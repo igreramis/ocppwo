@@ -1,0 +1,11 @@
+{
+    "messageType": 2,
+    "messageId": "abc123",
+    "action": "BootNotification",
+    "payload": {
+      "chargePointModel": "SingleSocketCharger",
+      "chargePointVendor": "OpenAI",
+      "firmwareVersion": null
+    }
+}
+  

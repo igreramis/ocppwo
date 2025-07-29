@@ -1,0 +1,75 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug tcp_server",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/tcp_server",
+        "args": [],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}",
+        "environment": [],
+        "externalConsole": true,
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for gdb",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ],
+        "miDebuggerPath": "/usr/bin/gdb"
+      }
+    ]
+  }
+  
+//   {
+//     "version": "0.2.0",
+//     "configurations": [
+//       {
+//         "name": "Debug tcp_server",
+//         "type": "cppdbg",
+//         "request": "launch",
+//         "program": "${workspaceFolder}/tcp_server",
+//         "args": [],
+//         "stopAtEntry": false,
+//         "cwd": "${workspaceFolder}",
+//         "environment": [],
+//         "externalConsole": true,
+//         "MIMode": "gdb",
+//         "setupCommands": [
+//           {
+//             "description": "Enable pretty-printing for gdb",
+//             "text": "-enable-pretty-printing",
+//             "ignoreFailures": true
+//           }
+//         ],
+//         "miDebuggerPath": "/usr/bin/gdb"
+//       },
+//       {
+//         "name": "Debug tcp_client",
+//         "type": "cppdbg",
+//         "request": "launch",
+//         "program": "${workspaceFolder}/tcp_client",
+//         "args": [],
+//         "stopAtEntry": false,
+//         "cwd": "${workspaceFolder}",
+//         "environment": [],
+//         "externalConsole": true,
+//         "MIMode": "gdb",
+//         "setupCommands": [
+//           {
+//             "description": "Enable pretty-printing for gdb",
+//             "text": "-enable-pretty-printing",
+//             "ignoreFailures": true
+//           }
+//         ],
+//         "miDebuggerPath": "/usr/bin/gdb"
+//       }
+//     ]
+//   }
+  
+//update tasks.json to build both
+// g++ -std=c++17 -I./include tcp_server.cpp -o tcp_server -lboost_system -pthread
+// g++ -std=c++17 -I./include tcp_client.cpp -o tcp_client -lboost_system -pthread

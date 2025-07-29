@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build and run main",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-I./include",
+        "main.cpp",
+        "-o",
+        "main",
+        "-lboost_system",
+        "-pthread",
+        "&&",
+        "./main"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "build and run tcp_client",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-I./include",
+        "tcp_client.cpp",
+        "ocpp_model.cpp",
+        "-o",
+        "tcp_client",
+        "-lboost_system",
+        "-pthread",
+        "&&",
+        "./tcp_client"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "build and run tcp_server",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-I./include",
+        "tcp_server.cpp",
+        "ocpp_model.cpp",
+        "-o",
+        "tcp_server",
+        "-lboost_system",
+        "-pthread",
+        "&&",
+        "./tcp_server"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
