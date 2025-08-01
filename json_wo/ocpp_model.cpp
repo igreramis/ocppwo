@@ -140,6 +140,59 @@ void dispatch_frame(const OcppFrame& message)
     }, message);
 }
 
+Call create_call(const std::string& id, const OcppPayload& payload){
+    //you either fill up the fucker in part by declaring it before hand
+    Call c;
+    c.messageTypeId = 2;
+    c.messageId = id;
+    c.action = action_for_payload( payload );
+    c.payload = std::visit([](const auto& payload){
+        return nlohmann::json(payload);
+    }, payload);
+
+    return c;
+}
+
+template<typename Payload>
+Call create_call(const std::string& action, const Payload& p) {
+    return Call{
+        2,
+        generate_message_id(),
+        action,
+        json(p)
+    };
+}
+
+std::string action_for_payload(const OcppPayload& payload)
+{
+    return std::visit([](auto &payload)->std::string{
+        using T = std::decay_t<decltype(payload)>;
+        if constexpr ( std::is_same_v<T, BootNotification> )
+        {
+            return "BootNotification";
+        }
+        else if constexpr ( std::is_same_v<T, Authorize> )
+        {
+            return "Authorize";
+        }
+        else
+        {
+            static_assert(!sizeof(T), "Unhandled payload type");
+        }
+    }, payload);
+}
+
+std::string generate_message_id() {
+    static std::mt19937 rng{std::random_device{}()};
+    static std::uniform_int_distribution<int> dist(0, 15);
+
+    std::string id = "msg_";
+    for (int i = 0; i < 8; ++i)
+        id += "0123456789ABCDEF"[dist(rng)];
+
+    return id;
+}
+
 #if 0
 CallResult BootNotificationHandler(const Call& c)
 {
@@ -185,7 +238,7 @@ OcppFrame BootNotificationHandler(const Call& c)
             "304"
             "Unexpected payload",
             error_details
-        }
+        };
     }
     
     BootNotificationResponse res = {

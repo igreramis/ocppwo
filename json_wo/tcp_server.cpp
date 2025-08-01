@@ -118,7 +118,23 @@ int main() {
         {
             //the output of handlerMap is now OcppFrame. It should be passed onto holds_alternative<Call>
             //holds_alternative<CallError> and dealt with accordingly
-            json j = handlerMap[c.action](c);
+            // json j = handlerMap[c.action](c);
+            OcppFrame f = handlerMap[c.action](c);
+            json j;
+            if( std::holds_alternative<CallResult>(f) )
+            {
+                CallResult cr = std::get<CallResult>(f);
+                // json j = cr;
+                j = cr;
+                // message = j.dump();
+            }
+            else if( std::holds_alternative<CallError>(f) )
+            {
+                CallError ce = std::get<CallError>(f);
+                // json j = ce;
+                j = ce;
+                // message] = j.dump();
+            }
             message = j.dump();
         }
         else{

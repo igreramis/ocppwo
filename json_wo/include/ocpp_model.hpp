@@ -3,6 +3,7 @@
 #include <json.hpp>
 #include <variant>
 #include <iostream>
+#include <random>
 using json = nlohmann::json;
 
 struct BootNotification {
@@ -64,6 +65,11 @@ void to_json(json& j, const AuthorizeResponse& r);
 void from_json(const json& j, AuthorizeResponse& r);
 OcppFrame parse_frame(json &x);
 void dispatch_frame(const OcppFrame& message);
+Call create_call(const std::string& id, const OcppPayload& payload);
+template<typename Payload>
+Call create_call(const std::string& action, const Payload& p);
+std::string action_for_payload(const OcppPayload& payload);
+std::string generate_message_id();
 void handle_call(const Call& x);
 void handle_call_result(const CallResult& x);
 #if 0
