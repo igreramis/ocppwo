@@ -96,7 +96,9 @@ OcppFrame parse_frame(json &x)
     switch(x.at(0).get<int>())
     {
         case 2://Call
+        {
             return x.get<Call>();
+        }
         break;
         case 3://CallResult
         {

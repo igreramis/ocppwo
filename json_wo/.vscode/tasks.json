@@ -47,6 +47,7 @@
         "-I./include",
         "tcp_server.cpp",
         "ocpp_model.cpp",
+        "router.cpp",
         "-o",
         "tcp_server",
         "-lboost_system",
@@ -56,6 +57,27 @@
       ],
       "group": "build",
       "problemMatcher": []
+    }
+    {
+        "label": "build and run tests",
+        "type": "shell",
+        "command": "g++",
+        "args": [
+            "-std=c++17",
+            "-Iinclude",
+            "tests/test_router.cpp",
+            "router.cpp",
+            "ocpp_model.cpp",
+            "-o",
+            "tests/test_router",
+            // "-lstdc++fs" // remove if not needed
+            "&&",
+            "./tests/test_router"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": false
+        }
     }
   ]
 }
