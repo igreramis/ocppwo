@@ -22,7 +22,7 @@ TEST_CASE("Router dispatches to correct handler") {
     //     // ...populate result as needed...
     //     return result;
     // };
-    auto bootHandler = [&](const BootNotification& b) -> OcppFrame {
+    auto bootHandler = [&](const BootNotification& b, const std::string& msgId) -> OcppFrame {
         bootHandlerCalled = true;
         BootNotificationResponse res = {
             "2025-07-16T12:00:00Z",
@@ -31,19 +31,19 @@ TEST_CASE("Router dispatches to correct handler") {
         };
         return CallResult {
             3,
-            "c.messageId",
+            msgId,
             res
         };
     };
 
-    auto authHandler = [&](const Authorize& a) -> OcppFrame {
+    auto authHandler = [&](const Authorize& a, const std::string& msgId) -> OcppFrame {
         authHandlerCalled = true;
         AuthorizeResponse res = {
             a.idTag + "OK",
         };
         return CallResult{
             3,
-            "c.messageId",
+            msgId,
             res
         };
     };

@@ -90,6 +90,6 @@ void handle_call_result(const CallResult& x);
 CallResult BootNotificationHandler(const Call& );
 CallResult AuthorizationHandler(const Call& );
 #endif
-OcppFrame BootNotificationHandler(const BootNotification& );
-OcppFrame AuthorizeHandler(const Authorize& );
+OcppFrame BootNotificationHandler(const BootNotification&, const std::string& );
+OcppFrame AuthorizeHandler(const Authorize&, const std::string& );
 #endif //OCPP_MODEL_HPP

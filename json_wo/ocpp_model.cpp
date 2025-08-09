@@ -227,10 +227,8 @@ CallResult AuthorizationHandler(const Call& c)
 #endif
 
 // OcppFrame BootNotificationHandler(const Call& c)
-OcppFrame BootNotificationHandler(const BootNotification& b)
+OcppFrame BootNotificationHandler(const BootNotification& b, const std::string& msgId)
 {
-    // BootNotification b = c.payload;
-    std::string msgId;
     if( b.chargePointModel.empty() || b.chargePointVendor.empty() )
     {
         json error_details {
@@ -258,10 +256,8 @@ OcppFrame BootNotificationHandler(const BootNotification& b)
     };
 }
 
-OcppFrame AuthorizeHandler(const Authorize& a)
+OcppFrame AuthorizeHandler(const Authorize& a, const std::string& msgId)
 {
-    std::string msgId;
-
     AuthorizeResponse res = {
         a.idTag + "OK",
     };

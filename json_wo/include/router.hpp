@@ -12,15 +12,16 @@ public:
     //a method for registering the callback so that route can use it.
     void registerHandler(std::string action, std::function<OcppFrame(const Call&)> handler);
     template<typename PayloadType>
-    void addHandler(std::function<OcppFrame(const PayloadType&)> handler){
+    void addHandler(std::function<OcppFrame(const PayloadType&, const std::string& )> handler){
         std::string action = OcppActionName<PayloadType>::value;
         handlerMap[action] = [handler](const Call& c) -> OcppFrame {
             PayloadType req = c.payload.get<PayloadType>();
-            OcppFrame f = handler(req);
-            std::visit([&](auto &msg){
-                msg.messageId = c.messageId;
-            }, f);
-            return f;
+            // OcppFrame f = handler(req);
+            // std::visit([&](auto &msg){
+            //     msg.messageId = c.messageId;
+            // }, f);
+            // return f;
+            return handler(req, c.messageId);
         };
     }
 private:
