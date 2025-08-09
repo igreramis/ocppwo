@@ -10,25 +10,52 @@ TEST_CASE("Router dispatches to correct handler") {
     bool authHandlerCalled = false;
 
     // Mock handlers
-    auto bootHandler = [&](const Call& c) -> OcppFrame {
+    // auto bootHandler = [&](const Call& c) -> OcppFrame {
+    //     bootHandlerCalled = true;
+    //     CallResult result;
+    //     // ...populate result as needed...
+    //     return result;
+    // };
+    // auto authHandler = [&](const Call& c) -> OcppFrame {
+    //     authHandlerCalled = true;
+    //     CallResult result;
+    //     // ...populate result as needed...
+    //     return result;
+    // };
+    auto bootHandler = [&](const BootNotification& b) -> OcppFrame {
         bootHandlerCalled = true;
-        CallResult result;
-        // ...populate result as needed...
-        return result;
-    };
-    auto authHandler = [&](const Call& c) -> OcppFrame {
-        authHandlerCalled = true;
-        CallResult result;
-        // ...populate result as needed...
-        return result;
+        BootNotificationResponse res = {
+            "2025-07-16T12:00:00Z",
+            300,
+            "Accepted"
+        };
+        return CallResult {
+            3,
+            "c.messageId",
+            res
+        };
     };
 
-    router.registerHandler("BootNotification", bootHandler);
-    router.registerHandler("Authorize", authHandler);
+    auto authHandler = [&](const Authorize& a) -> OcppFrame {
+        authHandlerCalled = true;
+        AuthorizeResponse res = {
+            a.idTag + "OK",
+        };
+        return CallResult{
+            3,
+            "c.messageId",
+            res
+        };
+    };
+    // router.registerHandler("BootNotification", bootHandler);
+    // router.registerHandler("Authorize", authHandler);
+    router.addHandler<BootNotification>(bootHandler);
+    router.addHandler<Authorize>(authHandler);
 
     SECTION("BootNotification dispatch") {
         Call call;
         call.action = "BootNotification";
+        call.payload = nlohmann::json(BootNotification{"X100", "OpenAI"});
         OcppFrame frame = router.route(call);
         REQUIRE(bootHandlerCalled);
         REQUIRE_FALSE(authHandlerCalled);
@@ -36,8 +63,10 @@ TEST_CASE("Router dispatches to correct handler") {
     }
 
     SECTION("Authorize dispatch") {
+        std::cout<<"1"<<std::endl;
         Call call;
         call.action = "Authorize";
+        call.payload = json(Authorize{"test_id"});
         OcppFrame frame = router.route(call);
         REQUIRE(authHandlerCalled);
         REQUIRE_FALSE(bootHandlerCalled);

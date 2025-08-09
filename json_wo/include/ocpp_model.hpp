@@ -46,6 +46,20 @@ struct CallError {
     json errorDetails;
 };
 
+template<typename T>
+struct OcppActionName;
+
+template<>
+struct OcppActionName<BootNotification> {
+    static constexpr const char* value = "BootNotification";
+};
+
+template<>
+struct OcppActionName<Authorize> {
+    static constexpr const char* value = "Authorize";
+};
+
+
 using OcppFrame = std::variant<Call, CallResult, CallError>;
 using OcppPayload = std::variant<BootNotification, Authorize>;
 
@@ -76,6 +90,6 @@ void handle_call_result(const CallResult& x);
 CallResult BootNotificationHandler(const Call& );
 CallResult AuthorizationHandler(const Call& );
 #endif
-OcppFrame BootNotificationHandler(const Call& );
-// CallResult AuthorizationHandler(const Call& );
+OcppFrame BootNotificationHandler(const BootNotification& );
+OcppFrame AuthorizeHandler(const Authorize& );
 #endif //OCPP_MODEL_HPP

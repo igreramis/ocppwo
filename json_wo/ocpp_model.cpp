@@ -226,9 +226,11 @@ CallResult AuthorizationHandler(const Call& c)
 }
 #endif
 
-OcppFrame BootNotificationHandler(const Call& c)
+// OcppFrame BootNotificationHandler(const Call& c)
+OcppFrame BootNotificationHandler(const BootNotification& b)
 {
-    BootNotification b = c.payload;
+    // BootNotification b = c.payload;
+    std::string msgId;
     if( b.chargePointModel.empty() || b.chargePointVendor.empty() )
     {
         json error_details {
@@ -236,7 +238,7 @@ OcppFrame BootNotificationHandler(const Call& c)
         };
         return CallError{
             4,
-            c.messageId,
+            msgId,
             "304"
             "Unexpected payload",
             error_details
@@ -251,21 +253,22 @@ OcppFrame BootNotificationHandler(const Call& c)
 
     return CallResult{
         3,
-        c.messageId,
+        msgId,
         res
     };
 }
 
-// OcppFrame AuthorizationHandler(const Call& c)
-// {
-//     Authorize a = c.payload;
-//     AuthorizeResponse res = {
-//         a.idTag + "OK",
-//     };
+OcppFrame AuthorizeHandler(const Authorize& a)
+{
+    std::string msgId;
 
-//     return CallResult{
-//         3,
-//         c.messageId,
-//         res
-//     };
-// }
+    AuthorizeResponse res = {
+        a.idTag + "OK",
+    };
+
+    return CallResult{
+        3,
+        msgId,
+        res
+    };
+}

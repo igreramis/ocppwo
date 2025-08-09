@@ -6,7 +6,6 @@
 #include "router.hpp"
 using boost::asio::ip::tcp;
 
-// CallResult _handle_call(const Call &c)
 OcppFrame _handle_call(const Call &c)
 {
     if( c.action == "BootNotification" )
@@ -49,8 +48,8 @@ OcppFrame _handle_call(const Call &c)
             json::parse(error_detail)
         };
     }
-
 }
+
 int main() {
     boost::asio::io_context io;
     tcp::acceptor acceptor(io, tcp::endpoint(tcp::v4(), 12345));
@@ -70,98 +69,11 @@ int main() {
 
     json msg_json = json::parse(message);
     OcppFrame frame = parse_frame(msg_json);
-    // dispatch_frame(frame);
-
-#if 0
-    std::map<std::string, std::function<CallResult(const Call&)>> handlerMap;
-    handlerMap["BootNotification"] = BootNotificationHandler;
-    handlerMap["Authorize"] = AuthorizationHandler;
-
-    if( std::holds_alternative<Call>(frame) )
-    {
-        Call c = std::get<Call>(frame);
-        if( handlerMap.find(c.action) != handlerMap.end() )
-        {
-            json j = handlerMap[c.action](c);
-            message = j.dump();
-        }
-        else{
-            json error_details = {
-                {"hint", "Supported actions: BootNotification, Authorization"}
-            };
-            
-            CallError ce {
-                4,
-                c.messageId,
-                "NotImplemented",
-                "Unknown action: " + c.action,
-                error_details
-            };
-            //setup a CallError
-            //convert it into json
-            json j = ce;
-            message = j.dump();
-        }
-        // message = j.dump();
-    }
-#endif
-
-#if 0
-    std::map<std::string, std::function<OcppFrame(const Call&)>> handlerMap;
-    handlerMap["BootNotification"] = BootNotificationHandler;
-    // handlerMap["Authorize"] = AuthorizationHandler;
-
-    if( std::holds_alternative<Call>(frame) )
-    {
-        Call c = std::get<Call>(frame);
-        if( handlerMap.find(c.action) != handlerMap.end() )
-        {
-            //the output of handlerMap is now OcppFrame. It should be passed onto holds_alternative<Call>
-            //holds_alternative<CallError> and dealt with accordingly
-            // json j = handlerMap[c.action](c);
-            OcppFrame f = handlerMap[c.action](c);
-            json j;
-            if( std::holds_alternative<CallResult>(f) )
-            {
-                CallResult cr = std::get<CallResult>(f);
-                // json j = cr;
-                j = cr;
-                // message = j.dump();
-            }
-            else if( std::holds_alternative<CallError>(f) )
-            {
-                CallError ce = std::get<CallError>(f);
-                // json j = ce;
-                j = ce;
-                // message] = j.dump();
-            }
-            message = j.dump();
-        }
-        else{
-            json error_details = {
-                {"hint", "Supported actions: BootNotification, Authorization"}
-            };
-            
-            CallError ce {
-                4,
-                c.messageId,
-                "NotImplemented",
-                "Unknown action: " + c.action,
-                error_details
-            };
-            //setup a CallError
-            //convert it into json
-            json j = ce;
-            message = j.dump();
-        }
-        // message = j.dump();
-    }
-#endif
 
 #if 1
     Router router;
-    router.registerHandler("BootNotification", BootNotificationHandler);
-    // router.registerHandler("Authorize", AuthorizationHandler);
+    router.addHandler<BootNotification>(BootNotificationHandler);
+    router.addHandler<Authorize>(AuthorizeHandler);
     if( std::holds_alternative<Call>(frame) )
     {
         OcppFrame f = router.route(std::get<Call>(frame));
@@ -180,59 +92,6 @@ int main() {
         }
         message = j.dump();
     }
-
-
-    // std::map<std::string, std::function<OcppFrame(const Call&)>> handlerMap;
-    // handlerMap["BootNotification"] = BootNotificationHandler;
-    // // handlerMap["Authorize"] = AuthorizationHandler;
-
-    //what does the following need to be replated with?
-    //create an instance of router. if the frame call, just pass it to route().
-    // if( std::holds_alternative<Call>(frame) )
-    // {
-    //     Call c = std::get<Call>(frame);
-    //     if( handlerMap.find(c.action) != handlerMap.end() )
-    //     {
-    //         //the output of handlerMap is now OcppFrame. It should be passed onto holds_alternative<Call>
-    //         //holds_alternative<CallError> and dealt with accordingly
-    //         // json j = handlerMap[c.action](c);
-    //         OcppFrame f = handlerMap[c.action](c);
-    //         json j;
-    //         if( std::holds_alternative<CallResult>(f) )
-    //         {
-    //             CallResult cr = std::get<CallResult>(f);
-    //             // json j = cr;
-    //             j = cr;
-    //             // message = j.dump();
-    //         }
-    //         else if( std::holds_alternative<CallError>(f) )
-    //         {
-    //             CallError ce = std::get<CallError>(f);
-    //             // json j = ce;
-    //             j = ce;
-    //             // message] = j.dump();
-    //         }
-    //         message = j.dump();
-    //     }
-    //     else{
-    //         json error_details = {
-    //             {"hint", "Supported actions: BootNotification, Authorization"}
-    //         };
-            
-    //         CallError ce {
-    //             4,
-    //             c.messageId,
-    //             "NotImplemented",
-    //             "Unknown action: " + c.action,
-    //             error_details
-    //         };
-    //         //setup a CallError
-    //         //convert it into json
-    //         json j = ce;
-    //         message = j.dump();
-    //     }
-    //     // message = j.dump();
-    // }
 #endif
 
     // Echo it back
