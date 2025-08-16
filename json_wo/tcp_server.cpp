@@ -93,9 +93,30 @@ int main() {
         message = j.dump();
     }
 #endif
-
-    // Echo it back
+    // std::cout << "[Server] Replying: " << message << "\n";
+    std::cout << "[Server] Replying: " << message << "\n";
     boost::asio::write(socket, boost::asio::buffer(message + "\n"));
 
     return 0;
 }
+
+// inside do_read() after getline:
+    // try {
+    //     auto j = json::parse(line);
+    //     OcppFrame frame = j.get<OcppFrame>(); // assuming from_json overloads
+
+    //     std::string out;
+
+    //     if (std::holds_alternative<Call>(frame)) {
+    //         const auto& call = std::get<Call>(frame);
+    //         OcppFrame reply = router.route(call);
+    //         out = json(reply).dump() + "\n";
+    //     } else {
+    //         // If a client sends CallResult/CallError to server, decide your behavior
+    //         out = "{\"warning\":\"unexpected frame\"}\n";
+    //     }
+
+    //     do_write(std::move(out));
+    // } catch (const std::exception& e) {
+    //     do_write(std::string{"{\"error\":\"parse failure: "} + e.what() + "\"}\n");
+    // }

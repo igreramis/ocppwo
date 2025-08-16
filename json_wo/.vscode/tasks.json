@@ -20,20 +20,20 @@
       "problemMatcher": []
     },
     {
-      "label": "build and run tcp_client",
+      "label": "build and run xtcp_client",
       "type": "shell",
       "command": "g++",
       "args": [
         "-std=c++17",
         "-I./include",
-        "tcp_client.cpp",
+        "xtcp_client.cpp",
         "ocpp_model.cpp",
         "-o",
-        "tcp_client",
+        "xtcp_client",
         "-lboost_system",
         "-pthread",
         "&&",
-        "./tcp_client"
+        "./xtcp_client"
       ],
       "group": "build",
       "problemMatcher": []

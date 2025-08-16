@@ -165,6 +165,18 @@ Call create_call(const std::string& action, const Payload& p) {
     };
 }
 
+Call create_call(const std::string& id, const std::string& action, const OcppPayload& payload){
+    Call c;
+    c.messageTypeId = 2;
+    c.messageId = id;
+    c.action = action;
+    c.payload = std::visit([](const auto& payload){
+        return nlohmann::json(payload);
+    }, payload);
+
+    return c;
+}
+
 std::string action_for_payload(const OcppPayload& payload)
 {
     return std::visit([](auto &payload)->std::string{
@@ -234,6 +246,7 @@ OcppFrame BootNotificationHandler(const BootNotification& b, const std::string& 
         json error_details {
             {"hint", "chargePointModel or chargePointVendor empty..."}
         };
+
         return CallError{
             4,
             msgId,
@@ -248,7 +261,7 @@ OcppFrame BootNotificationHandler(const BootNotification& b, const std::string& 
         300,
         "Accepted"
     };
-
+    std::cout<<"BootNotificationHandler: Returning CallResult"<<std::endl;
     return CallResult{
         3,
         msgId,

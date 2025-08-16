@@ -80,6 +80,7 @@ void from_json(const json& j, AuthorizeResponse& r);
 OcppFrame parse_frame(json &x);
 void dispatch_frame(const OcppFrame& message);
 Call create_call(const std::string& id, const OcppPayload& payload);
+Call create_call(const std::string& id, const std::string& action, const OcppPayload& payload);
 template<typename Payload>
 Call create_call(const std::string& action, const Payload& p);
 std::string action_for_payload(const OcppPayload& payload);
