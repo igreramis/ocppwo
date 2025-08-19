@@ -32,12 +32,7 @@ struct Session {
     // store pending
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
-    pend.resolve = std::move(on_reply);//when you send a call, you are expecting a reply.
-    //when you get the reply, you move it to resolve.
-    //you create an instance of an object that tracks the id that is pending a call result.
-    //it tracks it with a timeout. you place it in a map.
-    //when you get a CallResult, you iterate the map to see if an id in the map has been waiting
-    //for this result. if so, you satisfy it.
+    pend.resolve = std::move(on_reply);
     pending.emplace(id, std::move(pend));
 
     // start timer
@@ -56,7 +51,7 @@ struct Session {
         if( ec )
             std::cerr << "Write failed: " << ec.message() << "\n";
         else
-            std::cout<< "Sent " << len << " bytes: " << line << "\n";
+            std::cout << "TX>>>" << line << "\n";
       });
   }
 
@@ -64,7 +59,6 @@ struct Session {
     if (std::holds_alternative<CallResult>(f)) {
       const auto& r = std::get<CallResult>(f);
       auto it = pending.find(r.messageId);
-      std::cout<<"in "<< __func__ << " for messageId: " << r.messageId << "\n";
       if (it != pending.end()) { it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
       // TODO: if action == BootNotification, move to Ready and schedule heartbeat
     } else if (std::holds_alternative<CallError>(f)) {

@@ -4,6 +4,7 @@
 #include <string>
 #include "ocpp_model.hpp"
 #include "router.hpp"
+#include "server.hpp"
 using boost::asio::ip::tcp;
 
 OcppFrame _handle_call(const Call &c)
@@ -51,54 +52,74 @@ OcppFrame _handle_call(const Call &c)
 }
 
 int main() {
-    boost::asio::io_context io;
-    tcp::acceptor acceptor(io, tcp::endpoint(tcp::v4(), 12345));
+  boost::asio::io_context io;
+  Router router;
+  router.addHandler<BootNotification>(BootNotificationHandler);
+  router.addHandler<Authorize>(AuthorizeHandler);
+  tcp::acceptor acc(io, {tcp::v4(), 12345});
 
-    std::cout << "Server listening on port 12345...\n";
-    tcp::socket socket(io);
-    acceptor.accept(socket);
+  std::cout << "Server listening on port 12345...\n";
 
-    boost::asio::streambuf buf;
-    boost::asio::read_until(socket, buf, '\n');
-
-    std::istream input(&buf);
-    std::string message;
-    std::getline(input, message);
-
-    std::cout << "[Server] Received: " << message << "\n";
-
-    json msg_json = json::parse(message);
-    OcppFrame frame = parse_frame(msg_json);
-
-#if 1
-    Router router;
-    router.addHandler<BootNotification>(BootNotificationHandler);
-    router.addHandler<Authorize>(AuthorizeHandler);
-    if( std::holds_alternative<Call>(frame) )
-    {
-        OcppFrame f = router.route(std::get<Call>(frame));
-        json j;
-        if( std::holds_alternative<CallResult>(f) )
-        {
-            j = std::get<CallResult>(f);
-        }
-        else if( std::holds_alternative<CallError>(f) )
-        {
-            j = std::get<CallError>(f);
-        }
-        else
-        {
-            throw std::runtime_error("Unknown OcppFrame type");
-        }
-        message = j.dump();
-    }
-#endif
-    // std::cout << "[Server] Replying: " << message << "\n";
-    std::cout << "[Server] Replying: " << message << "\n";
-    boost::asio::write(socket, boost::asio::buffer(message + "\n"));
-
-    return 0;
+  std::function<void()> do_accept;
+  do_accept = [&]{
+    acc.async_accept([&](boost::system::error_code ec, tcp::socket s){
+      if (!ec) std::make_shared<ServerSession>(std::move(s), router)->start();
+      do_accept();
+    });
+  };
+  do_accept();
+  io.run();
 }
+
+// int main() {
+//     boost::asio::io_context io;
+//     tcp::acceptor acceptor(io, tcp::endpoint(tcp::v4(), 12345));
+
+//     std::cout << "Server listening on port 12345...\n";
+//     tcp::socket socket(io);
+//     acceptor.accept(socket);
+
+//     boost::asio::streambuf buf;
+//     boost::asio::read_until(socket, buf, '\n');
+
+//     std::istream input(&buf);
+//     std::string message;
+//     std::getline(input, message);
+
+//     std::cout << "[Server] Received: " << message << "\n";
+
+//     json msg_json = json::parse(message);
+//     OcppFrame frame = parse_frame(msg_json);
+
+// #if 1
+//     Router router;
+//     router.addHandler<BootNotification>(BootNotificationHandler);
+//     router.addHandler<Authorize>(AuthorizeHandler);
+//     if( std::holds_alternative<Call>(frame) )
+//     {
+//         OcppFrame f = router.route(std::get<Call>(frame));
+//         json j;
+//         if( std::holds_alternative<CallResult>(f) )
+//         {
+//             j = std::get<CallResult>(f);
+//         }
+//         else if( std::holds_alternative<CallError>(f) )
+//         {
+//             j = std::get<CallError>(f);
+//         }
+//         else
+//         {
+//             throw std::runtime_error("Unknown OcppFrame type");
+//         }
+//         message = j.dump();
+//     }
+// #endif
+//     // std::cout << "[Server] Replying: " << message << "\n";
+//     std::cout << "[Server] Replying: " << message << "\n";
+//     boost::asio::write(socket, boost::asio::buffer(message + "\n"));
+
+//     return 0;
+// }
 
 // inside do_read() after getline:
     // try {

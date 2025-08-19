@@ -63,6 +63,7 @@ struct OcppActionName<Authorize> {
 using OcppFrame = std::variant<Call, CallResult, CallError>;
 using OcppPayload = std::variant<BootNotification, Authorize>;
 
+void to_json(json &j, const OcppFrame &f);
 void from_json(const json &x, Call &c);
 void to_json(json &j, const Call &c);
 void from_json(const json &x, CallResult &c);

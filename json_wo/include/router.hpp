@@ -6,6 +6,7 @@
 #include <string>
 #include "ocpp_model.hpp"
 
+//TODO: FUKCING write the purpose of this class along with examples of usage
 class Router{
 public:
     OcppFrame route(const Call& c);

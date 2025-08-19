@@ -1,16 +1,29 @@
 #include "ocpp_model.hpp"
 
+void to_json(json &j, const OcppFrame &f)
+{
+    std::visit([&](auto msg){
+        using T = std::decay_t<decltype(msg)>;
+        if( std::is_same_v<T, Call> || std::is_same_v<T, CallResult> || std::is_same_v<T, CallError>) {
+            j = json(msg);
+        }
+        else {
+            throw std::runtime_error("Uknown OcppFrame type");
+        }
+    }, f);
+}
+
+void to_json(json &j, const Call &c)
+{
+    j = json::array({c.messageTypeId, c.messageId, c.action, c.payload});
+}
+
 void from_json(const json &x, Call &c)
 {
     c.messageTypeId = x.at(0);
     c.messageId = x.at(1);
     c.action= x.at(2);
     c.payload = x.at(3);
-}
-
-void to_json(json &j, const Call &c)
-{
-    j = json::array({c.messageTypeId, c.messageId, c.action, c.payload});
 }
 
 void from_json(const json &x, CallResult &c)
