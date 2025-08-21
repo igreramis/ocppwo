@@ -25,6 +25,14 @@ struct AuthorizeResponse {
     std::string idTagInfo;  // keep simple for now
 };
 
+struct HeartBeat {
+    // no fields, just a signal
+};
+
+struct HeartBeatResponse {
+    std::string currentTime; // format: date-time
+};
+
 struct Call {
     int messageTypeId;              // must be 2
     std::string messageId;          // e.g., "abc123"
@@ -59,9 +67,13 @@ struct OcppActionName<Authorize> {
     static constexpr const char* value = "Authorize";
 };
 
+template<>
+struct OcppActionName<HeartBeat> {
+    static constexpr const char* value = "HeartBeat";
+};
 
 using OcppFrame = std::variant<Call, CallResult, CallError>;
-using OcppPayload = std::variant<BootNotification, Authorize>;
+using OcppPayload = std::variant<BootNotification, Authorize, HeartBeat>;
 
 void to_json(json &j, const OcppFrame &f);
 void from_json(const json &x, Call &c);
@@ -78,6 +90,10 @@ void to_json(json& j, const Authorize& a);
 void from_json(const json& j, Authorize& a);
 void to_json(json& j, const AuthorizeResponse& r);
 void from_json(const json& j, AuthorizeResponse& r);
+void to_json(json& j, const HeartBeat& h);
+void from_json(const json& j, HeartBeat& h);
+void to_json(json& j, const HeartBeatResponse& r);
+void from_json(const json& j, HeartBeatResponse& r);
 OcppFrame parse_frame(json &x);
 void dispatch_frame(const OcppFrame& message);
 Call create_call(const std::string& id, const OcppPayload& payload);
@@ -94,4 +110,5 @@ CallResult AuthorizationHandler(const Call& );
 #endif
 OcppFrame BootNotificationHandler(const BootNotification&, const std::string& );
 OcppFrame AuthorizeHandler(const Authorize&, const std::string& );
+OcppFrame HeartBeatHandler(const HeartBeat&, const std::string& );
 #endif //OCPP_MODEL_HPP

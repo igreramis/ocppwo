@@ -98,6 +98,27 @@ void to_json(json& j, const Authorize& a)
     j = json::array({a.idTag});
 }
 
+void to_json(json& j, const HeartBeat& h)
+{
+    j = json::object();
+}
+
+void from_json(const json& j, HeartBeat& h)
+{
+    // no fields, just a signal
+    // nothing to do here
+}
+
+void to_json(json& j, const HeartBeatResponse &r)
+{
+    j = json::array({r.currentTime});
+}
+
+void from_json(const json& j, HeartBeatResponse &r)
+{
+    r.currentTime = j.at(0);
+}
+
 OcppFrame parse_frame(json &x)
 {
     if( !x.is_array() || x.size() < 3 )
@@ -202,6 +223,10 @@ std::string action_for_payload(const OcppPayload& payload)
         {
             return "Authorize";
         }
+        else if constexpr ( std::is_same_v<T, HeartBeat> )
+        {
+            return "Heartbeat";
+        }
         else
         {
             static_assert(!sizeof(T), "Unhandled payload type");
@@ -287,6 +312,22 @@ OcppFrame AuthorizeHandler(const Authorize& a, const std::string& msgId)
     AuthorizeResponse res = {
         a.idTag + "OK",
     };
+
+    return CallResult{
+        3,
+        msgId,
+        res
+    };
+}
+
+OcppFrame HeartBeatHandler(const HeartBeat& h, const std::string& msgId)
+{
+    // no fields, just a signal
+    HeartBeatResponse res = {
+        "2025-07-16T12:00:00Z" // example current time
+    };
+
+    std::cout<<"HeartBeatHandler: Returning CallResult"<<std::endl;
 
     return CallResult{
         3,

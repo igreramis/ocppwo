@@ -56,6 +56,7 @@ int main() {
   Router router;
   router.addHandler<BootNotification>(BootNotificationHandler);
   router.addHandler<Authorize>(AuthorizeHandler);
+  router.addHandler<HeartBeat>(HeartBeatHandler);
   tcp::acceptor acc(io, {tcp::v4(), 12345});
 
   std::cout << "Server listening on port 12345...\n";

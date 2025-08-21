@@ -8,18 +8,37 @@ struct Client {
     tcp::socket sock;
     boost::asio::streambuf buf;
     Session session; // pointer to Session
+    std::unique_ptr<boost::asio::steady_timer> timer;
+    static constexpr int HEARTBEAT_INTERVAL = 5; // seconds
     //have client own the fucking socket. have client own the fucking session.
 
     Client(boost::asio::io_context& io_) : io(io_),
                                            sock(io_),
                                            session(io_, sock) {}
+
+    void start_heartbeat(){
+        timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(HEARTBEAT_INTERVAL));
+        timer->async_wait([this](auto ec){
+            if (ec) 
+            {
+                std::cerr << "Heartbeat timer canceled: " << ec.message() << "\n";
+                return; // timer canceled = got reply
+            }
+            // send heartbeat
+            session.send_call("HeartBeat", HeartBeat{},
+                                [this](const OcppFrame& f){
+                if (std::holds_alternative<CallResult>(f)) {
+                    const auto& r = std::get<CallResult>(f);
+                    std::cout << "HeartbeatResponse: " << r.payload << "\n";
+                } else if (std::holds_alternative<CallError>(f)){
+                    const auto& e = std::get<CallError>(f);
+                    std::cerr << "Heartbeat Error: " << e.errorDescription << "\n";
+                }
+            });
+        });
+    }
+
     void connect_and_boot(const tcp::endpoint& ep) {
-        //session.send_call()
-        //give it a callback for BootNotificationHandler
-        //when the handler is executed on receiving response
-        //it starts the heartbeat timer
-        //the timer gets a callback that sends the HeartBeat payload through
-        //send_call() every x seconds and its callback processes the reply
         sock.async_connect(ep, [this](auto ec){
         if (ec) 
         {
@@ -34,30 +53,15 @@ struct Client {
                         std::cout << "BootNotificationResponse: "<< r.payload << "\n";
                         session.state = Session::State::Ready;
                         //start a heartbeat timer here
+                        start_heartbeat();
                     } else if (std::holds_alternative<CallError>(f)){
                         const auto& e = std::get<CallError>(f);
                         std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
                     }
                   });
+        
         async_read();
-        // send_call( "BootNotification", 
-        //     BootNotification{"X100", "OpenAI"},
-        //     [this](const OcppFrame& f) {
-        //         if (std::holds_alternative<CallResult>(f)) {
-        //             const auto& r = std::get<CallResult>(f);
-        //             std::cout << "BootNotification Result: " << r.payload.dump() << "\n";
-        //             session.state = Session::State::Ready; // move to Ready state
-        //             // start heartbeat timer here if needed
-        //         } else if (std::holds_alternative<CallError>(f)) {
-        //             const auto& e = std::get<CallError>(f);
-        //             std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
-        //         }
-        //     });
 
-        // Call c = create_call(generate_message_id(), "BootNotification", BootNotification{"X100", "OpenAI"});
-        // std::string line = json(c).dump() + "\n";
-        // async_write(line);
-        // async_read();
         });
     }
     void async_write(std::string line) {
