@@ -9,7 +9,7 @@ struct Client {
     boost::asio::streambuf buf;
     Session session; // pointer to Session
     std::unique_ptr<boost::asio::steady_timer> timer;
-    static constexpr int HEARTBEAT_INTERVAL = 5; // seconds
+    static constexpr int HEARTBEAT_INTERVAL = 24*60*60; // 1 day in seconds
     //have client own the fucking socket. have client own the fucking session.
 
     Client(boost::asio::io_context& io_) : io(io_),
@@ -35,6 +35,8 @@ struct Client {
                     std::cerr << "Heartbeat Error: " << e.errorDescription << "\n";
                 }
             });
+            // restart timer
+            start_heartbeat();
         });
     }
 
