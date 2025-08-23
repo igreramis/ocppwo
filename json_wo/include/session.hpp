@@ -27,7 +27,8 @@ struct Session {
                  std::chrono::seconds timeout = std::chrono::seconds(10))
   {
     auto id = generate_message_id();
-    Call c = create_call(id, action, OcppPayload{p}); // or your template overload
+    // Call c = create_call(id, action, OcppPayload{p}); // or your template overload
+    Call c = create_call(id, p);
     auto line = json(c).dump() + "\n";
     // store pending
     Pending pend;
@@ -59,7 +60,7 @@ struct Session {
     if (std::holds_alternative<CallResult>(f)) {
       const auto& r = std::get<CallResult>(f);
       auto it = pending.find(r.messageId);
-      if (it != pending.end()) { it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
+      if (it != pending.end()) {it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
       // TODO: if action == BootNotification, move to Ready and schedule heartbeat
     } else if (std::holds_alternative<CallError>(f)) {
       const auto& e = std::get<CallError>(f);

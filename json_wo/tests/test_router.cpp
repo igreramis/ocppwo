@@ -9,19 +9,6 @@ TEST_CASE("Router dispatches to correct handler") {
     bool bootHandlerCalled = false;
     bool authHandlerCalled = false;
 
-    // Mock handlers
-    // auto bootHandler = [&](const Call& c) -> OcppFrame {
-    //     bootHandlerCalled = true;
-    //     CallResult result;
-    //     // ...populate result as needed...
-    //     return result;
-    // };
-    // auto authHandler = [&](const Call& c) -> OcppFrame {
-    //     authHandlerCalled = true;
-    //     CallResult result;
-    //     // ...populate result as needed...
-    //     return result;
-    // };
     auto bootHandler = [&](const BootNotification& b, const std::string& msgId) -> OcppFrame {
         bootHandlerCalled = true;
         BootNotificationResponse res = {

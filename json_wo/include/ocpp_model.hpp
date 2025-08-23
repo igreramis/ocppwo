@@ -96,12 +96,20 @@ void to_json(json& j, const HeartBeatResponse& r);
 void from_json(const json& j, HeartBeatResponse& r);
 OcppFrame parse_frame(json &x);
 void dispatch_frame(const OcppFrame& message);
+std::string generate_message_id();
 Call create_call(const std::string& id, const OcppPayload& payload);
 Call create_call(const std::string& id, const std::string& action, const OcppPayload& payload);
 template<typename Payload>
-Call create_call(const std::string& action, const Payload& p);
+Call create_call(const std::string &id, const Payload& p) {
+    return Call{
+        2,
+        id,
+        OcppActionName<Payload>::value,
+        json(p)
+    };
+};
+
 std::string action_for_payload(const OcppPayload& payload);
-std::string generate_message_id();
 void handle_call(const Call& x);
 void handle_call_result(const CallResult& x);
 #if 0

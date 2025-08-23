@@ -189,16 +189,6 @@ Call create_call(const std::string& id, const OcppPayload& payload){
     return c;
 }
 
-template<typename Payload>
-Call create_call(const std::string& action, const Payload& p) {
-    return Call{
-        2,
-        generate_message_id(),
-        action,
-        json(p)
-    };
-}
-
 Call create_call(const std::string& id, const std::string& action, const OcppPayload& payload){
     Call c;
     c.messageTypeId = 2;
