@@ -22,7 +22,7 @@ struct Session {
     : io(io_), sock(s) {}
 
   template<typename Payload>
-  void send_call(const std::string& action, const Payload& p,
+  void send_call(const Payload& p,
                  std::function<void(const OcppFrame&)> on_reply,
                  std::chrono::seconds timeout = std::chrono::seconds(10))
   {

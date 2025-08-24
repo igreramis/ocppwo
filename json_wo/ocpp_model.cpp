@@ -72,7 +72,6 @@ void to_json(json& j, const BootNotificationResponse& r)
 
 void from_json(const json& j, BootNotificationResponse& r)
 {
-    std::cout<<"in from_json()..."<<std::endl;
     r.currentTime = j.at(0);
     r.interval = j.at(1);
     r.status = j.at(2);

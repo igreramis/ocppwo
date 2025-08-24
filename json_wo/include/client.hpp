@@ -15,17 +15,17 @@ struct Client {
                                            sock(io_),
                                            session(io_, sock) {}
 
-    void start_heartbeat(){
-        timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(HEARTBEAT_INTERVAL));
-        timer->async_wait([this](auto ec){
+    void start_heartbeat(int interval){
+        timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(interval));
+        timer->async_wait([interval, this](auto ec){
             if (ec) 
             {
                 std::cerr << "Heartbeat timer canceled: " << ec.message() << "\n";
                 return; // timer canceled = got reply
             }
             // send heartbeat
-            session.send_call("HeartBeat", HeartBeat{},
-                                [this](const OcppFrame& f){
+            session.send_call(HeartBeat{},
+                                [interval, this](const OcppFrame& f){
                 if (std::holds_alternative<CallResult>(f)) {
                     const auto& r = std::get<CallResult>(f);
                     std::cout << "HeartbeatResponse: " << r.payload << "\n";
@@ -35,7 +35,7 @@ struct Client {
                 }
             });
             // restart timer
-            start_heartbeat();
+            start_heartbeat(interval);
         });
     }
 
@@ -46,15 +46,21 @@ struct Client {
             std::cerr << "Connect failed: " << ec.message() << "\n";
             return;
         }
-        session.send_call("BootNotification",
-                  BootNotification{"X100", "OpenAI"},
+        session.send_call(BootNotification{"X100", "OpenAI"},
                   [this](const OcppFrame& f){
                     if( std::holds_alternative<CallResult>(f) ) {
                         auto r = std::get<CallResult>(f);
                         std::cout << "BootNotificationResponse: "<< r.payload << "\n";
-                        session.state = Session::State::Ready;
-                        //start a heartbeat timer here
-                        start_heartbeat();
+                        BootNotificationResponse resp = r.payload;
+                        if (resp.status == "Accepted") {
+                            std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
+                            session.state = Session::State::Ready;
+                            start_heartbeat(resp.interval);
+                        } else if (resp.status == "Pending") {
+                            std::cout << "BootNotification pending, interval: " << resp.interval << "\n";
+                        } else {
+                            std::cout << "BootNotification rejected\n";
+                        }
                     } else if (std::holds_alternative<CallError>(f)){
                         const auto& e = std::get<CallError>(f);
                         std::cerr << "BootNotification Error: " << e.errorDescription << "\n";

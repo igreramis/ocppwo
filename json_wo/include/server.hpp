@@ -29,7 +29,7 @@ struct ServerSession : std::enable_shared_from_this<ServerSession> {
         OcppFrame frame = parse_frame(j);
         if( std::holds_alternative<Call>(frame) ) {
             auto call = std::get<Call>(frame);
-            std::cout << "Received Call: " << call.action << "\n";
+            std::cout << __func__ << "Received Call: " << call.action << "\n";
             OcppFrame reply = router.route(call);
             json j_r = reply;
             std::string out = j_r.dump() + "\n";
@@ -53,18 +53,3 @@ struct ServerSession : std::enable_shared_from_this<ServerSession> {
       });
   }
 };
-
-// int main() {
-//   boost::asio::io_context io;
-//   Router router; // TODO: register handlers
-//   tcp::acceptor acc(io, {tcp::v4(), 12345});
-//   std::function<void()> do_accept;
-//   do_accept = [&]{
-//     acc.async_accept([&](boost::system::error_code ec, tcp::socket s){
-//       if (!ec) std::make_shared<ServerSession>(std::move(s), router)->start();
-//       do_accept();
-//     });
-//   };
-//   do_accept();
-//   io.run();
-// }
