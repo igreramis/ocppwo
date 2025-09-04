@@ -285,7 +285,7 @@ OcppFrame BootNotificationHandler(const BootNotification& b, const std::string& 
     
     BootNotificationResponse res = {
         "2025-07-16T12:00:00Z",
-        300,
+        5,//300,
         "Accepted"
     };
     std::cout<<"BootNotificationHandler: Returning CallResult"<<std::endl;

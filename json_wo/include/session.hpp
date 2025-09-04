@@ -5,29 +5,55 @@
 #include <functional>
 #include <boost/asio/steady_timer.hpp>
 #include "ocpp_model.hpp"
+#include "transport.hpp"
 
+//Purpose of Session class: handles OCPP message correlation, state, timers
 struct Session {
   enum class State { Disconnected, Connected, Booting, Ready };
   State state = State::Disconnected;
   boost::asio::io_context& io;
-  boost::asio::ip::tcp::socket& sock;
-
+  std::shared_ptr<Transport> transport;
   struct Pending {
     std::unique_ptr<boost::asio::steady_timer> timer;
     std::function<void(const OcppFrame&)> resolve;//callback to resolve the pending call
   };
   std::unordered_map<std::string, Pending> pending;
 
-  Session(boost::asio::io_context& io_, boost::asio::ip::tcp::socket& s)
-    : io(io_), sock(s) {}
+  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t) : io(io_), transport(t) {}
 
-  template<typename Payload>
+    std::unique_ptr<boost::asio::steady_timer> timer;
+    void start_heartbeat(int interval)
+    {
+        timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(interval));
+        timer->async_wait([interval, this](auto ec){
+            if (ec) 
+            {
+                std::cerr << "Heartbeat timer canceled: " << ec.message() << "\n";
+                return; // timer canceled = got reply
+            }
+            // send heartbeat
+            send_call(HeartBeat{},
+                                [interval, this](const OcppFrame& f){
+                if (std::holds_alternative<CallResult>(f)) {
+                    const auto& r = std::get<CallResult>(f);
+                    std::cout << "HeartbeatResponse: " << r.payload << "\n";
+                } else if (std::holds_alternative<CallError>(f)){
+                    const auto& e = std::get<CallError>(f);
+                    std::cerr << "Heartbeat Error: " << e.errorDescription << "\n";
+                }
+            });
+
+            // restart timer
+            start_heartbeat(interval);
+        });
+    }
+
+   template<typename Payload>
   void send_call(const Payload& p,
                  std::function<void(const OcppFrame&)> on_reply,
                  std::chrono::seconds timeout = std::chrono::seconds(10))
   {
     auto id = generate_message_id();
-    // Call c = create_call(id, action, OcppPayload{p}); // or your template overload
     Call c = create_call(id, p);
     auto line = json(c).dump() + "\n";
     // store pending
@@ -46,14 +72,7 @@ struct Session {
       if (p != pending.end()) { p->second.resolve(OcppFrame{err}); pending.erase(p); }
     });
 
-    // write
-    boost::asio::async_write(sock, boost::asio::buffer(line),
-      [line](auto ec, std::size_t len){ 
-        if( ec )
-            std::cerr << "Write failed: " << ec.message() << "\n";
-        else
-            std::cout << "TX>>>" << line << "\n";
-      });
+    transport->send(line);
   }
 
   void on_frame(const OcppFrame& f) {
@@ -61,11 +80,18 @@ struct Session {
       const auto& r = std::get<CallResult>(f);
       auto it = pending.find(r.messageId);
       if (it != pending.end()) {it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
-      // TODO: if action == BootNotification, move to Ready and schedule heartbeat
     } else if (std::holds_alternative<CallError>(f)) {
       const auto& e = std::get<CallError>(f);
       auto it = pending.find(e.messageId);
       if (it != pending.end()) { it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
     }
+  }
+
+  void on_wire_message(std::string_view message) {
+    std::string line{message};
+    std::cout << __func__ << "RX<<<" << line << "\n";
+    json j = json::parse(line);
+    OcppFrame f = parse_frame(j);
+    on_frame(f);
   }
 };
