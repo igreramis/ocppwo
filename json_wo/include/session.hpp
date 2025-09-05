@@ -55,7 +55,7 @@ struct Session {
   {
     auto id = generate_message_id();
     Call c = create_call(id, p);
-    auto line = json(c).dump() + "\n";
+    auto line = json(c).dump();
     // store pending
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
@@ -90,8 +90,13 @@ struct Session {
   void on_wire_message(std::string_view message) {
     std::string line{message};
     std::cout << __func__ << "RX<<<" << line << "\n";
-    json j = json::parse(line);
-    OcppFrame f = parse_frame(j);
-    on_frame(f);
+    try{
+
+        json j = json::parse(line);
+        OcppFrame f = parse_frame(j);
+        on_frame(f);
+    } catch ( const std::exception &e ) {
+        std::cerr << "Failed to parse incoming message: " << e.what() << "\n";
+    }
   }
 };
