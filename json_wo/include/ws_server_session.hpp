@@ -17,7 +17,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   WsServerSession(tcp::socket s) : ws_(std::move(s)) {
     router.addHandler<BootNotification>(BootNotificationHandler);
     router.addHandler<Authorize>(AuthorizeHandler);
-    // router.addHandler<HeartBeat>(HeartBeatHandler);
+    router.addHandler<HeartBeat>(HeartBeatHandler);
   }
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
   void start() override {

@@ -1,6 +1,7 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/asio.hpp>
+#include <deque>
 #include "transport.hpp"
 
 namespace beast = boost::beast;
@@ -13,6 +14,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   std::function<void(std::string_view)> on_msg_;
   std::function<void()> on_connected_;
   std::string host_, port_;
+  std::deque<std::shared_ptr<std::string>> write_queue_;
+  bool write_in_progress_ = false;
 
   WsClient(boost::asio::io_context& io, std::string host, std::string port)
     : res_(io), ws_(io), host_(std::move(host)), port_(std::move(port)) {}
@@ -78,10 +81,40 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     ws_.text(true);
     auto buf = std::make_shared<std::string>(std::move(text));
     auto self = shared_from_this();
-    ws_.async_write(boost::asio::buffer(*buf), [this,self,buf](auto ec, std::size_t len){ 
-        /* TODO */ 
-        if( ec ) {
-            std::cerr << "Websocket send error: " << ec.message() << "\n";
+    boost::asio::post(ws_.get_executor(), [this, self, buf]() {
+        if( write_queue_.size() > 1000 ) {
+            std::cerr << "Write queue overflow, dropping message\n";
+            return;
+        }
+        write_queue_.push_back(buf);
+        if(!write_in_progress_) {
+            do_write();
+        }
+    });
+
+  }
+
+  void do_write(){
+    //retreive buffer from ll(access and then remove)
+    if( write_queue_.empty() ) {
+        write_in_progress_ = false;
+        return;
+    }
+    write_in_progress_ = true;
+
+    ws_.text(true);
+    auto &buf = *write_queue_.front();
+    auto self = shared_from_this();
+    ws_.async_write(boost::asio::buffer(buf), [this,self](auto ec, std::size_t len){
+        if (ec) {
+            std::cerr << "WebSocket write error: " << ec.message() << "\n";
+        }
+        write_queue_.pop_front();
+        if( !write_queue_.empty()){
+            do_write(); //initiate next write
+        }
+        else {
+            write_in_progress_ = false;
         }
     });
   }
