@@ -13,6 +13,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   beast::flat_buffer buffer_;
   std::function<void(std::string_view)> on_msg_;
   std::function<void()> on_connected_;
+  std::function<void()> on_closed_;
   std::string host_, port_;
   std::deque<std::shared_ptr<std::string>> write_queue_;
   bool write_in_progress_ = false;
@@ -22,7 +23,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
 
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
   void on_connected(std::function<void()> cb) { on_connected_ = std::move(cb); }
-  
+  void on_close(std::function<void()> cb) { on_closed_ = std::move(cb); }
+
   //connect to server(via tcp and upgrade to ws). start reading the connection
   void start() override {
     auto self = shared_from_this();
@@ -121,6 +123,9 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
 
   void close() override {
     auto self = shared_from_this();
-    ws_.async_close(websocket::close_code::normal, [this,self](auto){});
+    ws_.async_close(websocket::close_code::normal, [this,self](auto){
+        std::cout << "WebSocket closed\n";
+        if( on_closed_ ) on_closed_();
+    });
   }
 };

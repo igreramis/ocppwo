@@ -34,6 +34,12 @@ int main() {
     auto ss = std::make_shared<Session>(io, ws);
     std::weak_ptr<Session> wss = ss;
     std::cout<<"Connecting to ws://" << "\n";
+    ws->on_close([wss](){
+        if( auto ss = wss.lock() ) {
+            ss->on_close();
+        }
+    });
+
     ws->on_connected([&](){
         ss->send_call(BootNotification{"X100", "OpenAI"},
                   [wss](const OcppFrame& f){

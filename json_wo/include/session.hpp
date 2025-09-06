@@ -99,4 +99,14 @@ struct Session {
         std::cerr << "Failed to parse incoming message: " << e.what() << "\n";
     }
   }
+
+  void on_close(){
+    state = State::Disconnected;
+    for (auto& [id, p] : pending) {
+        CallError err{4, id, "ConnectionClosed", "Connection closed before reply", json::object()};
+        p.resolve(OcppFrame{err});
+        p.timer->cancel();
+    }
+    pending.clear();
+  }
 };

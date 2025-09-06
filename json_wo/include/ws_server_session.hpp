@@ -59,6 +59,8 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   }
   void close() override {
     auto self = shared_from_this();
-    ws_.async_close(websocket::close_code::normal, [this,self](auto){});
+    ws_.async_close(websocket::close_code::normal, [this,self](auto){
+        std::cout << "WebSocket closed\n";
+    });
   }
 };
