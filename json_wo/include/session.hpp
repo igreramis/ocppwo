@@ -26,6 +26,12 @@ struct Session {
   }
 
     std::unique_ptr<boost::asio::steady_timer> timer;
+
+    void start(void)
+    {
+        transport->start();
+    }
+
     void start_heartbeat(int interval)
     {
         timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(interval));
@@ -64,10 +70,10 @@ struct Session {
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
     pend.resolve = std::move(on_reply);
-    pending.emplace(id, std::move(pend));
+    auto [it, ok] = pending.emplace(id, std::move(pend));
+
 
     // start timer
-    auto it = pending.find(id);
     it->second.timer->async_wait([this,id](auto ec){
       if (ec) return; // canceled = got reply
       // synthesize timeout error and resolve
