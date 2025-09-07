@@ -1,6 +1,7 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/asio.hpp>
+#include <deque>
 #include "transport.hpp"
 #include "router.hpp"
 
@@ -14,6 +15,8 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   std::function<void(std::string_view)> on_msg_;
   std::function<void()> on_closed_;
   Router router;
+  std::deque<std::shared_ptr<std::string>> write_queue_;
+  bool write_in_progress_ = false;
 
   WsServerSession(tcp::socket s) : ws_(std::move(s)) {
     router.addHandler<BootNotification>(BootNotificationHandler);
@@ -47,19 +50,46 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
       do_read();
     });
   }
+
   void send(std::string text) override {
-    ws_.text(true);
     auto buf = std::make_shared<std::string>(std::move(text));
     auto self = shared_from_this();
-    ws_.async_write(boost::asio::buffer(*buf), [this,self,buf](auto ec, std::size_t len){
-      if (ec) {
-        std::cerr << "WebSocket write error: " << ec.message() << "\n";
-      }
-      else {
-        std::cout << "Bytes sent: " << len << "\n";
-      }
+    boost::asio::post(ws_.get_executor(), [this, self, buf]() {
+        if( write_queue_.size() > 1000 ) {
+            std::cerr << "Write queue overflow, dropping message\n";
+            return;
+        }
+        write_queue_.push_back(buf);
+        if(!write_in_progress_) {
+            do_write();
+        }
+    });
+
+  }
+
+  void do_write(){
+    if( write_queue_.empty() ) {
+        write_in_progress_ = false;
+        return;
+    }
+    write_in_progress_ = true;
+
+    auto &buf = *write_queue_.front();
+    auto self = shared_from_this();
+    ws_.async_write(boost::asio::buffer(buf), [this,self](auto ec, std::size_t len){
+        if (ec) {
+            std::cerr << "WebSocket write error: " << ec.message() << "\n";
+        }
+        write_queue_.pop_front();
+        if( !write_queue_.empty()){
+            do_write(); //initiate next write
+        }
+        else {
+            write_in_progress_ = false;
+        }
     });
   }
+
   void close() override {
     auto self = shared_from_this();
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
