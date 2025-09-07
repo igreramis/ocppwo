@@ -12,6 +12,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   websocket::stream<tcp::socket> ws_;
   beast::flat_buffer buffer_;
   std::function<void(std::string_view)> on_msg_;
+  std::function<void()> on_closed_;
   Router router;
 
   WsServerSession(tcp::socket s) : ws_(std::move(s)) {
@@ -19,6 +20,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
     router.addHandler<Authorize>(AuthorizeHandler);
     router.addHandler<HeartBeat>(HeartBeatHandler);
   }
+  void on_close(std::function<void()> cb) { on_closed_ = std::move(cb); }
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
   void start() override {
     auto self = shared_from_this();
@@ -36,6 +38,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
     ws_.async_read(buffer_, [this,self](auto ec, std::size_t){
       if (ec) {
         std::cerr << "WebSocket read error: " << ec.message() << "\n";
+        if( on_closed_ ) on_closed_();
         return;
       }
       std::string text = beast::buffers_to_string(buffer_.data());
@@ -61,6 +64,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
     auto self = shared_from_this();
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
         std::cout << "WebSocket closed\n";
+        if( on_closed_ ) on_closed_();
     });
   }
 };

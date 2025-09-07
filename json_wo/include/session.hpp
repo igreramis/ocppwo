@@ -23,6 +23,9 @@ struct Session {
     transport->on_message([this](std::string_view sv){
         this->on_message(sv);
     });
+    transport->on_close([this](){
+        this->on_close();
+    });
   }
 
     std::unique_ptr<boost::asio::steady_timer> timer;
