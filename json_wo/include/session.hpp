@@ -19,7 +19,11 @@ struct Session {
   };
   std::unordered_map<std::string, Pending> pending;
 
-  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t) : io(io_), transport(t) {}
+  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t) : io(io_), transport(t) {
+    transport->on_message([this](std::string_view sv){
+        this->on_message(sv);
+    });
+  }
 
     std::unique_ptr<boost::asio::steady_timer> timer;
     void start_heartbeat(int interval)
@@ -87,11 +91,10 @@ struct Session {
     }
   }
 
-  void on_wire_message(std::string_view message) {
+  void on_message(std::string_view message) {
     std::string line{message};
     std::cout << __func__ << "RX<<<" << line << "\n";
     try{
-
         json j = json::parse(line);
         OcppFrame f = parse_frame(j);
         on_frame(f);

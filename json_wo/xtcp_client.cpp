@@ -57,14 +57,7 @@ int main() {
                     }
                   });
     });
-    ws->on_message([wss](std::string_view sv){ 
-        if (auto ss = wss.lock()) {
-            ss->on_wire_message(sv);
-        }
-        else {
-            std::cerr << "Session already destroyed, ignoring message\n";
-        }
-    });
+
     ws->start();
     io.run();
 
