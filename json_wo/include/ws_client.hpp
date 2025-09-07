@@ -51,6 +51,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
           }
           
           std::cout << "Handshake complete!\n";
+
+          ws_.text(true);
           
           //connect and boot
         //   send("BootNotification or your initial message");
@@ -62,14 +64,14 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     });
   }
 
-  //TODO: implement connect adn boot here
-  //also impelment heartbeat here.
-
   void do_read() {
     auto self = shared_from_this();
     ws_.async_read(buffer_, [this,self](auto ec, std::size_t){
       if (ec) {
         std::cerr << "WebSocket read error: " << ec.message() << "\n";
+        
+        if( on_closed_ ) on_closed_();
+        
         return;
       }
       std::string text = beast::buffers_to_string(buffer_.data());
@@ -80,7 +82,6 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   }
 
   void send(std::string text) override {
-    ws_.text(true);
     auto buf = std::make_shared<std::string>(std::move(text));
     auto self = shared_from_this();
     boost::asio::post(ws_.get_executor(), [this, self, buf]() {
@@ -104,7 +105,6 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     }
     write_in_progress_ = true;
 
-    ws_.text(true);
     auto &buf = *write_queue_.front();
     auto self = shared_from_this();
     ws_.async_write(boost::asio::buffer(buf), [this,self](auto ec, std::size_t len){
