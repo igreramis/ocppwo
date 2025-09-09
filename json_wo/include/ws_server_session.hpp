@@ -14,15 +14,14 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   beast::flat_buffer buffer_;
   std::function<void(std::string_view)> on_msg_;
   std::function<void()> on_closed_;
-  Router router;
+  std::function<void(const Call&, std::function<void(const OcppFrame&)>)> on_call_;
   std::deque<std::shared_ptr<std::string>> write_queue_;
   bool write_in_progress_ = false;
 
   WsServerSession(tcp::socket s) : ws_(std::move(s)) {
-    router.addHandler<BootNotification>(BootNotificationHandler);
-    router.addHandler<Authorize>(AuthorizeHandler);
-    router.addHandler<HeartBeat>(HeartBeatHandler);
   }
+  
+  void on_call(std::function<void(const Call&, std::function<void(const OcppFrame&)>)> cb){on_call_ = std::move(cb);}
   void on_close(std::function<void()> cb) { on_closed_ = std::move(cb); }
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
   void start() override {
@@ -47,6 +46,21 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
       std::string text = beast::buffers_to_string(buffer_.data());
       buffer_.consume(buffer_.size());
       if (on_msg_) on_msg_(text);
+
+      json j = json::parse(text);
+      OcppFrame f = parse_frame(j);
+      if( std::holds_alternative<Call>(f) ) {
+        auto call = std::get<Call>(f);
+        if( on_call_ ) {
+            auto cb = [this](const OcppFrame &f) {
+                json j = f;
+                std::string s = j.dump();
+                this->send(s);
+            };
+            on_call_(call, cb);
+        }
+      }
+
       do_read();
     });
   }
