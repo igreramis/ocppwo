@@ -1,25 +1,53 @@
 {
     "version": "0.2.0",
     "configurations": [
+      // {
+      //   "name": "Debug tcp_server",
+      //   "type": "cppdbg",
+      //   "request": "launch",
+      //   "program": "${workspaceFolder}/tcp_server",
+      //   "args": [],
+      //   "stopAtEntry": false,
+      //   "cwd": "${workspaceFolder}",
+      //   "environment": [],
+      //   "externalConsole": true,
+      //   "MIMode": "gdb",
+      //   "setupCommands": [
+      //     {
+      //       "description": "Enable pretty-printing for gdb",
+      //       "text": "-enable-pretty-printing",
+      //       "ignoreFailures": true
+      //     }
+      //   ],
+      //   "miDebuggerPath": "/usr/bin/gdb"
+      // },
+
+      // new configuration to debug the gtest binary under gdb
       {
-        "name": "Debug tcp_server",
+        "name": "Debug HappyPath (gdb)",
         "type": "cppdbg",
         "request": "launch",
-        "program": "${workspaceFolder}/tcp_server",
+        "program": "${workspaceFolder}/tests/test_happy_path",
         "args": [],
         "stopAtEntry": false,
         "cwd": "${workspaceFolder}",
         "environment": [],
-        "externalConsole": true,
+        "externalConsole": false,
         "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "preLaunchTask": "build-happy-path",
         "setupCommands": [
           {
             "description": "Enable pretty-printing for gdb",
             "text": "-enable-pretty-printing",
             "ignoreFailures": true
+          },
+          {
+            "description": "Break on C++ throw",
+            "text": "catch throw",
+            "ignoreFailures": true
           }
-        ],
-        "miDebuggerPath": "/usr/bin/gdb"
+        ]
       }
     ]
   }

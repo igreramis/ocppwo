@@ -20,7 +20,7 @@
       "problemMatcher": []
     },
     {
-      "label": "build and run xtcp_client",
+      "label": "build and run tcp_client",
       "type": "shell",
       "command": "g++",
       "args": [
@@ -57,14 +57,14 @@
       ],
       "group": "build",
       "problemMatcher": []
-    }
+    },
     {
         "label": "build and run tests",
         "type": "shell",
         "command": "g++",
         "args": [
             "-std=c++17",
-            "-Iinclude",
+            "-I./include",
             "tests/test_router.cpp",
             "router.cpp",
             "ocpp_model.cpp",
@@ -78,6 +78,92 @@
             "kind": "build",
             "isDefault": false
         }
+    },
+    {
+      "label": "build-and-run-integration-tests",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+          "-std=c++17",
+          "-I./include",
+          "tests/test_server.cpp",
+          "router.cpp",
+          "ocpp_model.cpp",
+          "-o",
+          "tests/integration",
+          "-lboost_system",
+          "-pthread",
+          "&&",
+          "tests/integration"
+      ],
+      "group": { "kind": "build", "isDefault": false },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build-and-run-happy-path (system-gtest)",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-O0", "-g",
+        "-I", "${workspaceFolder}/include",
+        "-I", "${workspaceFolder}/tests",
+        "${workspaceFolder}/router.cpp",
+        "${workspaceFolder}/ocpp_model.cpp",
+        "${workspaceFolder}/tests/test_server.cpp",
+        "${workspaceFolder}/tests/test_happy_path.cpp",
+        "-o", "${workspaceFolder}/tests/test_happy_path",
+        "-lboost_system",
+        "-lgtest",
+        "-lgtest_main",
+        "-pthread",
+        "&&",
+        "${workspaceFolder}/tests/test_happy_path"
+      ],
+      "group": { "kind": "build", "isDefault": false },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "build-and-debug-happy-path (gdb)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "g++ -std=c++17 -O0 -g -rdynamic -I \"${workspaceFolder}/include\" -I \"${workspaceFolder}/tests\" \"${workspaceFolder}/router.cpp\" \"${workspaceFolder}/ocpp_model.cpp\" \"${workspaceFolder}/tests/test_server.cpp\" \"${workspaceFolder}/tests/test_happy_path.cpp\" -o \"${workspaceFolder}/tests/test_happy_path\" -lboost_system -lgtest -lgtest_main -pthread && gdb --args \"${workspaceFolder}/tests/test_happy_path\""
+      ],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "group": { "kind": "build", "isDefault": false },
+      "problemMatcher": []
+    },
+    { // add this block
+      "label": "build-happy-path",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-O0",
+        "-g",
+        "-rdynamic",
+        "-I", "${workspaceFolder}/include",
+        "-I", "${workspaceFolder}/tests",
+        "${workspaceFolder}/router.cpp",
+        "${workspaceFolder}/ocpp_model.cpp",
+        "${workspaceFolder}/tests/test_server.cpp",
+        "${workspaceFolder}/tests/test_happy_path.cpp",
+        "-o", "${workspaceFolder}/tests/test_happy_path",
+        "-lboost_system",
+        "-lgtest",
+        "-lgtest_main",
+        "-pthread"
+      ],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }
