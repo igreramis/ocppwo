@@ -123,3 +123,61 @@ TEST(HappyPath, BootAcceptedThenHeartbeat) {
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();
 }
+
+TEST(SmokeTest, UnknownActionReturnsCallError) {
+    using namespace std::chrono_literals;
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    TestServer server(ioc, port);
+    server.set_boot_conf("boot_msg_id", 2);
+    server.start();
+
+    ClientUnderTest cut;
+    cut.start(ioc, "127.0.0.1", std::to_string(port));
+
+    std::thread io_thread([&]{ ioc.run(); });
+
+    // ---- Wait for BootNotification to arrive at CSMS ----
+    std::string boot_id;
+    for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+        std::this_thread::sleep_for(100ms);
+        boot_id = server.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+    
+    auto beats_before = server.heartbeats();
+    
+    //put in logic for sending UnknownType message and checking for CallError response
+    if( auto ss = cut.wss_.lock() ) {
+        ss->send_call(UnknownAction{},
+                      [](const OcppFrame& f) {
+                          if( std::holds_alternative<CallError>(f) ) {
+                              auto ce = std::get<CallError>(f);
+                              ASSERT_EQ(ce.errorCode, "NotImplemented");
+                            }
+                            else {
+                                FAIL() << "Expected CallError response for UnknownAction";
+                            }
+                        });
+                    }
+                    
+    std::this_thread::sleep_for(5s);
+    
+    auto beats_after = server.heartbeats();
+
+    ASSERT_GT(beats_after.size(), beats_before.size() ) << "Heartbeats have unexpectedly stopped";
+
+    //Cleanup
+    cut.stop();
+    server.stop();
+    ioc.stop();
+    if(io_thread.joinable() ) io_thread.join();
+}

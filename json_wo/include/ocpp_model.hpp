@@ -33,6 +33,10 @@ struct HeartBeatResponse {
     std::string currentTime; // format: date-time
 };
 
+struct UnknownAction {
+    // Placeholder for unknown actions
+};
+
 struct Call {
     int messageTypeId;              // must be 2
     std::string messageId;          // e.g., "abc123"
@@ -72,6 +76,11 @@ struct OcppActionName<HeartBeat> {
     static constexpr const char* value = "HeartBeat";
 };
 
+template<>
+struct OcppActionName<UnknownAction> {
+    static constexpr const char* value = "UnknownAction";
+};
+
 using OcppFrame = std::variant<Call, CallResult, CallError>;
 using OcppPayload = std::variant<BootNotification, Authorize, HeartBeat>;
 
@@ -94,11 +103,32 @@ void to_json(json& j, const HeartBeat& h);
 void from_json(const json& j, HeartBeat& h);
 void to_json(json& j, const HeartBeatResponse& r);
 void from_json(const json& j, HeartBeatResponse& r);
+void to_json(json& j, const UnknownAction& a);
 OcppFrame parse_frame(json &x);
 void dispatch_frame(const OcppFrame& message);
 std::string generate_message_id();
 Call create_call(const std::string& id, const OcppPayload& payload);
 Call create_call(const std::string& id, const std::string& action, const OcppPayload& payload);
+
+/**
+ * create_call
+ *
+ * Build an OCPP Call frame (messageTypeId == 2) for sending.
+ *
+ *      Convenience template: deduces the action name via OcppActionName<Payload>::value and
+ *      serializes the concrete payload to json(p).
+ *
+ * Parameters:
+ *  - id: unique message id to assign to the Call.
+ *  - payload / p: payload content (either variant or concrete payload type).
+ *
+ * Return value:
+ *  - Call: populated Call structure with messageTypeId, messageId, action, and JSON payload.
+ *
+ * Notes:
+ *  - The template overload performs serialization with nlohmann::json.
+ *  - Caller is responsible for providing a unique id when required by the protocol.
+ */
 template<typename Payload>
 Call create_call(const std::string &id, const Payload& p) {
     return Call{

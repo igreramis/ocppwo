@@ -118,6 +118,10 @@ void from_json(const json& j, HeartBeatResponse &r)
     r.currentTime = j.at(0);
 }
 
+void to_json( json& j, const UnknownAction& a ) {
+    j = json::object();
+}
+
 OcppFrame parse_frame(json &x)
 {
     if( !x.is_array() || x.size() < 3 )

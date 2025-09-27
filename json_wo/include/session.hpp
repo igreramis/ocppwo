@@ -61,6 +61,22 @@ struct Session {
         });
     }
 
+/**
+ * send_call
+ *
+ * Send an OCPP Call built from the given payload and arrange to receive a reply.
+ *
+ * Parameters:
+ *  - p: payload to be wrapped into a Call (any type serializable by json(c)).
+ *  - on_reply: callback invoked when a reply is received or on error/timeout.
+ *              The callback receives an OcppFrame which will be either CallResult
+ *              (successful reply) or CallError (error, timeout, or connection closed).
+ *  - timeout: optional timeout duration after which a synthetic CallError is delivered
+ *             to on_reply. Defaults to 10 seconds.
+ *
+ * Return value:
+ *  - void
+ */
    template<typename Payload>
   void send_call(const Payload& p,
                  std::function<void(const OcppFrame&)> on_reply,
