@@ -1,0 +1,10 @@
+json
+    say you just want to create the following json:
+    {
+        "idTag": "TIMEOUT_TEST"
+    }
+    this would do that for you:
+        json payload = json::object({{"idTag","TIMEOUT_TEST"}});
+
+    to populate a payload, we just make the struct, populate it and
+    dump it into the sending mechanism.

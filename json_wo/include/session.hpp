@@ -6,6 +6,7 @@
 #include <boost/asio/steady_timer.hpp>
 #include "ocpp_model.hpp"
 #include "transport.hpp"
+#include <mutex>
 
 //Purpose of Session class: handles OCPP message correlation, state, timers
 struct Session {
@@ -13,6 +14,7 @@ struct Session {
   State state = State::Disconnected;
   boost::asio::io_context& io;
   std::shared_ptr<Transport> transport;
+  std::mutex pending_mtx;
   struct Pending {
     std::unique_ptr<boost::asio::steady_timer> timer;
     std::function<void(const OcppFrame&)> resolve;//callback to resolve the pending call
@@ -89,6 +91,7 @@ struct Session {
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
     pend.resolve = std::move(on_reply);
+    std::lock_guard<std::mutex> lock(pending_mtx);
     auto [it, ok] = pending.emplace(id, std::move(pend));
 
 
@@ -96,23 +99,51 @@ struct Session {
     it->second.timer->async_wait([this,id](auto ec){
       if (ec) return; // canceled = got reply
       // synthesize timeout error and resolve
+      // it hides data race and timing bug. the serializing and displaying out
+      // makes things happen before the main and in time for it to p[rint]
+      // std::cout<<"Triggering timeout for messageId "<<id<<"\n";
       CallError err{4, id, "Timeout", "Request timed out", json::object()};
-      auto p = pending.find(id);
-      if (p != pending.end()) { p->second.resolve(OcppFrame{err}); pending.erase(p); }
-    });
+      std::function<void(const OcppFrame &)> cb;
+      {
+        std::lock_guard<std::mutex> lock(pending_mtx);
+        auto p = pending.find(id);
+        if (p != pending.end()) { cb = p->second.resolve; pending.erase(p); }
+      }
+      if(cb) cb(OcppFrame{err}); });
 
     transport->send(line);
   }
 
-  void on_frame(const OcppFrame& f) {
-    if (std::holds_alternative<CallResult>(f)) {
-      const auto& r = std::get<CallResult>(f);
+  void on_frame(const OcppFrame &f)
+  {
+    if (std::holds_alternative<CallResult>(f))
+    {
+      const auto &r = std::get<CallResult>(f);
+      std::lock_guard<std::mutex> lock(pending_mtx);
       auto it = pending.find(r.messageId);
-      if (it != pending.end()) {it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
-    } else if (std::holds_alternative<CallError>(f)) {
-      const auto& e = std::get<CallError>(f);
-      auto it = pending.find(e.messageId);
-      if (it != pending.end()) { it->second.timer->cancel(); it->second.resolve(f); pending.erase(it); }
+      if (it != pending.end())
+      {
+        it->second.timer->cancel();
+        it->second.resolve(f);
+        pending.erase(it);
+      }
+    }
+    else if (std::holds_alternative<CallError>(f))
+    {
+      const auto &e = std::get<CallError>(f);
+      std::function<void(const OcppFrame &)> cb;
+      {
+        std::lock_guard<std::mutex> lock(pending_mtx);
+        auto it = pending.find(e.messageId);
+        if (it != pending.end())
+        {
+          it->second.timer->cancel();
+          cb = it->second.resolve;
+          pending.erase(it);
+        }
+      }
+      if (cb)
+        cb(f);
     }
   }
 
@@ -128,13 +159,27 @@ struct Session {
     }
   }
 
-  void on_close(){
+  void on_close()
+  {
     state = State::Disconnected;
-    for (auto& [id, p] : pending) {
-        CallError err{4, id, "ConnectionClosed", "Connection closed before reply", json::object()};
-        p.resolve(OcppFrame{err});
+    // you dump everything into a vector and then clear from there.
+    // i dont want to call resolve inside the fucking lock_guard
+    // pair(id, resolve)
+    std::vector<std::pair<std::string, std::function<void(const OcppFrame &)>>> to_close;
+    {
+      std::lock_guard<std::mutex> lock(pending_mtx);
+      for (auto &[id, p] : pending)
+      {
+        to_close.emplace_back(id, p.resolve);
         p.timer->cancel();
+      }
+      pending.clear();
     }
-    pending.clear();
+    for (auto &v : to_close)
+    {
+      CallError err{4, v.first, "ConnectionClosed", "Connection closed before reply", json::object()};
+      if (v.second)
+        v.second(OcppFrame{err});
+    }
   }
 };

@@ -2,6 +2,7 @@
 #include <boost/asio.hpp>
 #include <chrono>
 #include <thread>
+#include <string>
 #include "test_server.hpp"
 #include "ws_client.hpp"
 #include "session.hpp"
@@ -9,6 +10,7 @@
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
 using tcp = boost::asio::ip::tcp;
+using namespace std;
 
 struct ClientUnderTest{
     //provide a way to start the client pointing to ws:127.0.0.1:port
@@ -16,6 +18,18 @@ struct ClientUnderTest{
     std::shared_ptr<WsClient> client_;
     std::shared_ptr<Session> ss_;
     std::weak_ptr<Session> wss_;
+    unsigned transport_max_writes_in_flight() const {
+        return client_->transport_max_writes_in_flight();
+    }
+
+    unsigned transport_max_write_queue_depth() const {
+        return client_->transport_max_write_queue_depth();
+    }
+
+    unsigned transport_current_write_queue_depth() const {
+        return client_->transport_current_write_queue_depth();
+    }
+
     void start(boost::asio::io_context& io, std::string host, std::string port)
     {
         client_ = std::make_shared<WsClient>(io, host, port);
@@ -69,12 +83,6 @@ struct ClientUnderTest{
     };
 };
 
-//this test runs in one thread. that is for gtest. to run io operations, 
-//we need to spawn another thread.
-//we create instances such that they are created on one thread, but they
-//run their operations on another thread. that is totally allowed.
-//but for varibles (and therefore memory) that ends up being shared by the two
-//threads because of this arrangement, we need to use mutexex to protect them.
 TEST(HappyPath, BootAcceptedThenHeartbeat) {
     using namespace std::chrono_literals;
     boost::asio::io_context ioc;
@@ -174,6 +182,138 @@ TEST(SmokeTest, UnknownActionReturnsCallError) {
     auto beats_after = server.heartbeats();
 
     ASSERT_GT(beats_after.size(), beats_before.size() ) << "Heartbeats have unexpectedly stopped";
+
+    //Cleanup
+    cut.stop();
+    server.stop();
+    ioc.stop();
+    if(io_thread.joinable() ) io_thread.join();
+}
+
+TEST(SmokeTest, Timeout_NoServerReply_LocalTimeoutError) {
+    using namespace std::chrono_literals;
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    TestServer server(ioc, port);
+    server.set_boot_conf("boot_msg_id", 2);
+    server.start();
+
+    ClientUnderTest cut;
+    cut.start(ioc, "127.0.0.1", std::to_string(port));
+
+    std::thread io_thread([&]{ ioc.run(); });
+
+    // ---- Wait for BootNotification to arrive at CSMS ----
+    std::string boot_id;
+    for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+        std::this_thread::sleep_for(100ms);
+        boot_id = server.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+    
+    // put in logic for sending UnknownType message and checking for CallError response
+    //  bool received_timeout = false;
+    std::atomic<bool> received_timeout{false};
+    std::promise<void> p;
+    auto f = p.get_future();
+    if (auto ss = cut.wss_.lock())
+    {
+        ss->send_call(Authorize{"TIMEOUT_TEST"}, [&received_timeout, &p](const OcppFrame &f)
+                      {
+                          if (std::holds_alternative<CallError>(f))
+                          {
+                              auto ce = std::get<CallError>(f);
+                              p.set_value();
+                          }
+                          else
+                          {
+                              FAIL() << "Expected local Timeout response but got Server reply";
+                          } }, std::chrono::seconds(10));
+    }
+
+    auto status = f.wait_for(std::chrono::seconds(11));
+    ASSERT_EQ(status, std::future_status::ready) << "Did not receive expected Timeout response";
+
+
+    //Cleanup
+    cut.stop();
+    server.stop();
+    ioc.stop();
+    if(io_thread.joinable() ) io_thread.join();
+}
+
+TEST(SmokeTest, BackPressure_ThousandSmallFrames_SerializedWrites) {
+    using namespace std::chrono_literals;
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    TestServer server(ioc, port);
+    server.set_boot_conf("boot_msg_id", 2);
+    server.start();
+
+    ClientUnderTest cut;
+    cut.start(ioc, "127.0.0.1", std::to_string(port));
+
+    std::thread io_thread([&]{ ioc.run(); });
+
+    // ---- Wait for BootNotification to arrive at CSMS ----
+    std::string boot_id;
+    for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+        std::this_thread::sleep_for(100ms);
+        boot_id = server.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+    
+    int N = 1000;
+    for( int i = 0; i < N; i++ ) {
+        json frame = json::array({2, std::to_string(i), "Ping", json::object({{"seq", i }})});
+        cut.client_->send(frame.dump());
+    }
+
+    std::this_thread::sleep_for(3s);
+
+    EXPECT_LE(cut.transport_max_writes_in_flight(), 1u) << "Transprot allowed concurrent writes; must serialize writes.";
+
+    EXPECT_GT(cut.transport_max_write_queue_depth(), 0u) << "Never observed queue growth; test may not have stressed the writer.";
+
+    EXPECT_EQ(cut.transport_current_write_queue_depth(), 0u) << "Never observed current queue depth; test may not have stressed the writer.";
+
+    auto frames = server.received();
+    std::vector<int> seqs;
+
+    for( auto &frame : frames )
+    {
+        //how to convert string to json
+        auto a = json::parse(frame.text);
+        if( a.is_array() && a.size() > 3 && a[2] == "Ping" ) {
+            seqs.push_back(a[3].value("seq", -1));
+        }
+    }
+    ASSERT_EQ(seqs.size(), N) << "Server did not receive all Ping messages";
+
+    bool monotonic = false;
+    for( int i=1; i < seqs.size(); i++ ){
+        if( seqs[i] != seqs[i-1] + 1 ) {
+            monotonic = false;
+            break;
+        }
+    }
+    ASSERT_FALSE(monotonic) << "Ping messages received out of order";
 
     //Cleanup
     cut.stop();

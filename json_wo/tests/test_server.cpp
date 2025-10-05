@@ -43,6 +43,12 @@ void TestServer::start(){
                     if( c.action == "BootNotification" ) {
                         last_boot_msg_id_ = c.messageId;
                     }
+                    if( c.action == "Authorize" ) {
+                        return;
+                    }
+                    if( c.action == "Ping" ) {
+                        return;
+                    }
                     respond(reply);
                 });
 
