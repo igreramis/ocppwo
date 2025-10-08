@@ -83,7 +83,6 @@ struct ClientUnderTest{
     };
 };
 
-#if 0
 TEST(HappyPath, BootAcceptedThenHeartbeat) {
     using namespace std::chrono_literals;
     boost::asio::io_context ioc;
@@ -322,7 +321,6 @@ TEST(SmokeTest, BackPressure_ThousandSmallFrames_SerializedWrites) {
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();
 }
-#endif
 
 TEST(SmokeTest, CloseFlow_ServerClose_ResovlesPendings) {
     using namespace std::chrono_literals;
