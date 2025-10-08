@@ -46,10 +46,17 @@ void TestServer::start(){
                     if( c.action == "Authorize" ) {
                         return;
                     }
+                    /* Given the nature of the test using the Ping packet, we don't need to reply with a response.*/
                     if( c.action == "Ping" ) {
                         return;
                     }
                     respond(reply);
+                });
+
+                ss->on_close([this](){
+                    std::cout << "Client disconnected\n";
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    client_disconnected = true;
                 });
 
                 ss->start();
@@ -114,6 +121,10 @@ std::string TestServer::last_boot_msg_id() const{
     return last_boot_msg_id_;
 }
 
+bool TestServer::is_client_disconnected() const{
+    std::lock_guard<std::mutex> lock(mtx_);
+    return client_disconnected;
+}
 // int main(){
 //     boost::asio::io_context io;
 //     // tcp::acceptor acc(io, {tcp::v4(), 12345});

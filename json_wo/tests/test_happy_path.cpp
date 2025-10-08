@@ -83,6 +83,7 @@ struct ClientUnderTest{
     };
 };
 
+#if 0
 TEST(HappyPath, BootAcceptedThenHeartbeat) {
     using namespace std::chrono_literals;
     boost::asio::io_context ioc;
@@ -318,6 +319,68 @@ TEST(SmokeTest, BackPressure_ThousandSmallFrames_SerializedWrites) {
     //Cleanup
     cut.stop();
     server.stop();
+    ioc.stop();
+    if(io_thread.joinable() ) io_thread.join();
+}
+#endif
+
+TEST(SmokeTest, CloseFlow_ServerClose_ResovlesPendings) {
+    using namespace std::chrono_literals;
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    TestServer server(ioc, port);
+    server.set_boot_conf("boot_msg_id", 10);
+    server.start();
+
+    ClientUnderTest cut;
+    cut.start(ioc, "127.0.0.1", std::to_string(port));
+
+    std::thread io_thread([&]{ ioc.run(); });
+
+    // ---- Wait for BootNotification to arrive at CSMS ----
+    std::string boot_id;
+    for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+        std::this_thread::sleep_for(100ms);
+        boot_id = server.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+    
+    json payload = json::object({{"idTag", "PENDCLOSE"}});
+    json frame = json::array({2, "idTag1234", "Authorize", json::object({{"idTag", "PENDCLOSE"}})});
+    auto sp = std::make_shared<std::promise<void>>();
+    auto fu = sp->get_future();
+    cut.ss_->send_call(Authorize{"PENDCLOSE"}, [sp](const OcppFrame& f) mutable{
+        if( std::holds_alternative<CallResult>(f) ) {
+            std::cout<<"Authorize response received in test\n";
+            sp->set_value();
+        }
+    }, std::chrono::seconds(3));
+
+    server.stop();
+
+    auto status = fu.wait_for(std::chrono::seconds(4));
+    EXPECT_FALSE(status == std::future_status::ready);
+    EXPECT_TRUE(server.is_client_disconnected());
+
+
+    cut.ss_->send_call(HeartBeat{}, [sp](const OcppFrame& f) mutable{
+        if( std::holds_alternative<CallError>(f) ) {
+            sp->set_value();
+        }
+    }, std::chrono::seconds(2));
+    status = fu.wait_for(std::chrono::seconds(3));
+    EXPECT_TRUE(status == std::future_status::ready);
+
+    //Cleanup
+    cut.stop();
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();
 }

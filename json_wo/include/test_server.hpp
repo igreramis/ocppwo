@@ -33,6 +33,7 @@ class TestServer {
         std::vector<Frame> received() const;
         std::vector<Frame> heartbeats() const;
         std::string last_boot_msg_id() const;
+        bool is_client_disconnected() const;
     private:
         void do_read();
         OcppFrame TestBootNotificationHandler(const BootNotification&, const std::string& );
@@ -49,4 +50,5 @@ class TestServer {
         bool running_ = false;
         std::string last_boot_msg_id_;
         int heartbeat_interval_ = 5;
+        bool client_disconnected = false;
     };
