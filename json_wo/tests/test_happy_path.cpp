@@ -95,7 +95,7 @@ TEST(HappyPath, BootAcceptedThenHeartbeat) {
     }
 
     TestServer server(ioc, port);
-    server.set_boot_conf("boot_msg_id", 2);
+    server.set_boot_conf("boot_msg_id", /*heartbeat time in s*/ 2);
     server.start();
 
     ClientUnderTest cut;

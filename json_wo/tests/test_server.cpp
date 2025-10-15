@@ -6,8 +6,13 @@ TestServer::TestServer(asio::io_context& ioc, unsigned short port):
     router_.addHandler<BootNotification>([this](const BootNotification& p, const std::string& s){
         return this->TestBootNotificationHandler(p, s);
     });
+    router_.register_handler<OcppActionName<BootNotification>, BootNotification, BootNotificationResponse>([this](const BootNotification &x)->tl::expected<BootNotificationResponse, std::string>{
+        return this->TestBootNotificationHandler_v2(x);
+    });
     router_.addHandler<Authorize>(AuthorizeHandler);
+    router_.register_handler<OcppActionName<Authorize>, Authorize, AuthorizeResponse>(AuthorizeHandler_v2);
     router_.addHandler<HeartBeat>(HeartBeatHandler);
+    router_.register_handler<OcppActionName<HeartBeat>, HeartBeat, HeartBeatResponse>(HeartBeatHandler_v2);
 }
 
 void TestServer::start(){
@@ -33,25 +38,37 @@ void TestServer::start(){
                             if( c.action == "HeartBeat" ) {
                                 heartbeats_.push_back(Frame{std::string(msg), now});
                             }
+                            else if( c.action == "BootNotification" ) {
+                                last_boot_msg_id_ = c.messageId;
+                            }
+                            else if( c.action == "Authorize" ) {
+                                return;
+                            }
+                            else if( c.action == "Ping" ) {
+                                return;
+                            }
                         }
                     }
+                    router_.handle_incoming(msg, [this](std::string&& reply){
+                        ss->send(reply);
+                    });
                 });
 
-                ss->on_call([this, wss](const Call& c, std::function<void(const OcppFrame& f)> respond){
-                    std::cout << __func__ << "Received Call: " << c.action << "\n";
-                    OcppFrame reply = router_.route(c);
-                    if( c.action == "BootNotification" ) {
-                        last_boot_msg_id_ = c.messageId;
-                    }
-                    if( c.action == "Authorize" ) {
-                        return;
-                    }
-                    /* Given the nature of the test using the Ping packet, we don't need to reply with a response.*/
-                    if( c.action == "Ping" ) {
-                        return;
-                    }
-                    respond(reply);
-                });
+                // ss->on_call([this, wss](const Call& c, std::function<void(const OcppFrame& f)> respond){
+                //     std::cout << __func__ << "Received Call: " << c.action << "\n";
+                //     OcppFrame reply = router_.route(c);
+                //     if( c.action == "BootNotification" ) {
+                //         last_boot_msg_id_ = c.messageId;
+                //     }
+                //     if( c.action == "Authorize" ) {
+                //         return;
+                //     }
+                //     /* Given the nature of the test using the Ping packet, we don't need to reply with a response.*/
+                //     if( c.action == "Ping" ) {
+                //         return;
+                //     }
+                //     respond(reply);
+                // });
 
                 ss->on_close([this](){
                     std::cout << "Client disconnected\n";
@@ -98,6 +115,20 @@ OcppFrame TestServer::TestBootNotificationHandler(const BootNotification& b, con
         3,
         msgId,
         res
+    };
+}
+
+tl::expected<BootNotificationResponse, std::string> TestServer::TestBootNotificationHandler_v2(const BootNotification& b)
+{
+    if( b.chargePointModel.empty() || b.chargePointVendor.empty() )
+    {
+        return tl::unexpected("payload...");
+    }
+    
+    return BootNotificationResponse {
+        "2025-07-16T12:00:00Z",
+        heartbeat_interval_,
+        "Accepted"
     };
 }
 

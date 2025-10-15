@@ -37,6 +37,7 @@ class TestServer {
     private:
         void do_read();
         OcppFrame TestBootNotificationHandler(const BootNotification&, const std::string& );
+        tl::expected<BootNotificationResponse, std::string> TestBootNotificationHandler_v2(const BootNotification&);
         boost::asio::io_context& ioc_;
         tcp::acceptor acc_;
         websocket::stream<tcp::socket> ws_;

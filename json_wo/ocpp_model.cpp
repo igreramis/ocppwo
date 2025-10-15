@@ -313,6 +313,13 @@ OcppFrame AuthorizeHandler(const Authorize& a, const std::string& msgId)
     };
 }
 
+tl::expected<AuthorizeResponse, std::string> AuthorizeHandler_v2(const Authorize& a)
+{
+    return AuthorizeResponse{
+        a.idTag + "OK",
+    };
+}
+
 OcppFrame HeartBeatHandler(const HeartBeat& h, const std::string& msgId)
 {
     // no fields, just a signal
@@ -327,4 +334,14 @@ OcppFrame HeartBeatHandler(const HeartBeat& h, const std::string& msgId)
         msgId,
         res
     };
+}
+
+tl::expected<HeartBeatResponse, std::string> HeartBeatHandler_v2(const HeartBeat& h)
+{
+    // no fields, just a signal
+    HeartBeatResponse res = {
+        "2025-07-16T12:00:00Z" // example current time
+    };
+
+    return res;
 }

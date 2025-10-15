@@ -4,6 +4,7 @@
 #include <variant>
 #include <iostream>
 #include <random>
+#include <tl/expected.hpp>
 using json = nlohmann::json;
 
 struct BootNotification {
@@ -148,5 +149,7 @@ CallResult AuthorizationHandler(const Call& );
 #endif
 OcppFrame BootNotificationHandler(const BootNotification&, const std::string& );
 OcppFrame AuthorizeHandler(const Authorize&, const std::string& );
+tl::expected<AuthorizeResponse, std::string> AuthorizeHandler_v2(const Authorize& );
 OcppFrame HeartBeatHandler(const HeartBeat&, const std::string& );
+tl::expected<HeartBeatResponse, std::string> HeartBeatHandler_v2(const HeartBeat& );
 #endif //OCPP_MODEL_HPP
