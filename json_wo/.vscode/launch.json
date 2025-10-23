@@ -24,6 +24,31 @@
 
       // new configuration to debug the gtest binary under gdb
       {
+        "name": "Debug router tests (gdb)",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/tests/test_router",
+        "args": [],
+        "cwd": "${workspaceFolder}",
+        "preLaunchTask": "build router tests",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "MIMode": "gdb",
+        "externalConsole": false,
+        "stopAtEntry": false,
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for gdb",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          },
+          {
+            "description": "Break on C++ throw",
+            "text": "catch throw",
+            "ignoreFailures": true
+          }
+        ]
+      },
+      {
         "name": "Debug HappyPath (gdb)",
         "type": "cppdbg",
         "request": "launch",

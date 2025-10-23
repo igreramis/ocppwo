@@ -1,5 +1,8 @@
 #include "ocpp_model.hpp"
 
+/*Note: Use a JSON object. In OCPP 1.6J, the Call frame is an array [2, "<id>", "<Action>", <Payload>], and the Payload is an object
+  per the action’s schema. For Authorize.req the payload is {"idTag": "<value>"}. */
+
 void to_json(json &j, const OcppFrame &f)
 {
     std::visit([&](auto msg){
@@ -54,10 +57,14 @@ void to_json(json &j, const CallError& c)
 
 void from_json(const json& j, BootNotification& b)
 {
-    // b.chargePointModel = j.at("chargePointModel");
-    // b.chargePointVendor = j.at("chargePointVendor");
-    b.chargePointModel = j.at(0);
-    b.chargePointVendor = j.at(1);
+    if( j.is_object() ) {
+        b.chargePointModel = j.at("chargePointModel");
+        b.chargePointVendor = j.at("chargePointVendor");
+    }
+    else if( j.is_array() ) {
+        b.chargePointModel = j.at(0).get<std::string>();
+        b.chargePointVendor = j.at(1).get<std::string>();
+    }
 }
 
 void to_json(json& j, const BootNotification& b)
@@ -67,7 +74,12 @@ void to_json(json& j, const BootNotification& b)
 
 void to_json(json& j, const BootNotificationResponse& r)
 {
-    j = json::array({r.currentTime, r.interval, r.status});
+    // j = json::array({r.currentTime, r.interval, r.status});
+    j = json{
+        {"currentTime", r.currentTime},
+        {"interval", r.interval},
+        {"status", r.status}
+    };
 }
 
 void from_json(const json& j, BootNotificationResponse& r)
@@ -77,24 +89,97 @@ void from_json(const json& j, BootNotificationResponse& r)
     r.status = j.at(2);
 }
 
+/**
+ * to_json — Authorize.conf (OCPP 1.6J)
+ *
+ * Serializes the Authorize confirmation payload, i.e. the 3rd element of the CallResult frame:
+ *   [3, "<messageId>", <payload>]
+ *
+ * OCPP 1.6J (full schema) expects:
+ *   { "idTagInfo": { "status": "<Status>", "expiryDate"?: "<dateTime>", "parentIdTag"?: "<string>" } }
+ *
+ * This implementation (simplified model) serializes as:
+ *   { "idTagInfo": "<string>" }
+ *
+ * Behavior:
+ *   - Emits a JSON object where "idTagInfo" is taken from r.idTagInfo.
+ *   - Payloads in OCPP are JSON objects; only the outer envelope is an array.
+ */
 void to_json(json& j, const AuthorizeResponse& r)
 {
-    j = json::array({r.idTagInfo});
+    // j = json::array({r.idTagInfo});
+    j = json{
+        {"idTagInfo", r.idTagInfo}
+    };
 }
 
+/**
+ * from_json — Authorize.conf (OCPP 1.6J)
+ *
+ * Parses the Authorize confirmation payload, i.e. the 3rd element of the CallResult frame:
+ *   [3, "<messageId>", <payload>]
+ *
+ * OCPP 1.6J (full schema) expects:
+ *   { "idTagInfo": { "status": "<Status>", "expiryDate"?: "<dateTime>", "parentIdTag"?: "<string>" } }
+ *
+ * This implementation (simplified model) parses:
+ *   { "idTagInfo": "<string>" }
+ *
+ * Behavior:
+ *   - Extracts r.idTagInfo from j.at("idTagInfo").
+ *   - Throws nlohmann::json exceptions if the key is missing or not a string.
+ *   - Payloads in OCPP are JSON objects; only the outer envelope is an array.
+ */
 void from_json(const json& j, AuthorizeResponse& r)
 {
-    r.idTagInfo = j.at(0);
+    // r.idTagInfo = j.at(0);
+    r.idTagInfo = j.at("idTagInfo").get<std::string>();
 }
 
+/**
+ * from_json — Authorize.req (OCPP 1.6J)
+ *
+ * Parses the Authorize request payload, i.e. the 4th element of the OCPP Call frame:
+ *   [2, "<messageId>", "Authorize", <payload>]
+ *
+ * Expected payload shape per OCPP 1.6J JSON schema:
+ *   { "idTag": "<string>" }
+ *
+ * Behavior:
+ *   - Extracts a.idTag from j.at("idTag").
+ *   - Throws nlohmann::json::type_error/out_of_range if j is not an object
+ *     or if "idTag" is missing/not a string.
+ *
+ * Note:
+ *   Payloads in OCPP are objects; only the outer Call envelope is an array.
+ */
 void from_json(const json& j, Authorize& a)
 {
-    a.idTag = j.at(0);
+    // a.idTag = j.at(0);
+    a.idTag = j.at("idTag").get<std::string>();
 }
 
+/**
+ * to_json — Authorize.req (OCPP 1.6J)
+ *
+ * Serializes the Authorize request payload, i.e. the 4th element of the OCPP Call frame:
+ *   [2, "<messageId>", "Authorize", <payload>]
+ *
+ * Expected payload shape per OCPP 1.6J JSON schema:
+ *   { "idTag": "<string>" }
+ *
+ * Behavior:
+ *   - Emits a JSON object with key "idTag" set to a.idTag.
+ *
+ * Note:
+ *   Payloads in OCPP are JSON objects; only the outer Call envelope is an array.
+ */
 void to_json(json& j, const Authorize& a)
 {
-    j = json::array({a.idTag});
+    // j = json::array({a.idTag});
+    j = json{
+        {"idTag", a.idTag}
+    };
 }
 
 void to_json(json& j, const HeartBeat& h)
