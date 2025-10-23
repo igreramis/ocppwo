@@ -7,7 +7,78 @@
 #include <tl/expected.hpp>
 #include "ocpp_model.hpp"
 
-//TODO: FUKCING write the purpose of this class along with examples of usage
+/*
+Router v2 — Typed JSON dispatch (register_handler + handle_incoming)
+
+Overview
+- v2 lets you register type-safe handlers that receive deserialized OCPP request payloads
+  and produce confirmation payloads, while the router handles JSON parsing and framing.
+- Use when you receive raw OCPP JSON text (e.g., over WebSocket).
+
+Frame shapes (OCPP 1.6J)
+- Call:        [2, "<messageId>", "<Action>", <PayloadObject>]
+- CallResult:  [3, "<messageId>", <PayloadObject>]
+- CallError:   [4, "<messageId>", "<ErrorCode>", "<ErrorDescription>", <ErrorDetailsObject>]
+
+Key rules
+- Payloads are JSON objects per action schema (e.g., Authorize.req: {"idTag":"..."}).
+- Only the outer envelope is an array.
+
+Types
+- Handler<Tag, Req, Conf> = std::function<tl::expected<Conf, std::string>(const Req&)>
+  - Req  — request type (from_json must exist)
+  - Conf — confirmation/response type (to_json must exist)
+  - Return tl::expected with Conf on success, or std::string error on failure.
+
+How to use (v2)
+1) Define JSON models for your actions:
+   - Provide to_json/from_json(Req) and to_json/from_json(Conf).
+     Example: BootNotificationResponse must serialize as object:
+       {"currentTime":"...","interval":10,"status":"Accepted"}.
+
+2) Implement a handler:
+   auto bootHandler_v2 = [&](const BootNotification& req)
+       -> tl::expected<BootNotificationResponse, std::string> {
+       return BootNotificationResponse{"2025-07-16T12:00:00Z", 10, "Accepted"};
+   };
+
+3) Register the handler:
+   router.register_handler<OcppActionName<BootNotification>, BootNotification, BootNotificationResponse>(bootHandler_v2);
+
+4) Dispatch incoming frames:
+   std::string frame = R"([2,"abc","BootNotification",{"chargePointModel":"X","chargePointVendor":"Y"}])";
+   router.handle_incoming(frame, [&](std::string&& reply){
+       // reply will be a serialized CallResult or CallError string
+       // Forward it to your serialized write queue; avoid throwing.
+   });
+
+Behavior of handle_incoming
+- Parses JSON and validates minimal Call shape.
+- Extracts uniqueId, action name, payload JSON.
+- If a handler is registered:
+  - payload.get<Req>() → h(req)
+  - On success: sends CallResult [3, uniqueId, Conf-as-JSON].
+  - On handler error (expected string): sends CallError
+      [4, uniqueId, "InternalError", <error>, {}].
+- If parsing/shape/JSON conversion fails: sends CallError
+    [4, uniqueId, "FormationViolation", <what()>, {}].
+- If messageTypeId is wrong (≠ 2): sends CallError
+    [4, uniqueId, "ProtocolError", "Unsupported messageTypeId", {}].
+- If action is unknown: sends CallError
+    [4, uniqueId, "NotImplemented", "Unknown action: <Action>", {}].
+
+Send callback contract
+- The router calls send(std::string&&) exactly once per incoming frame path.
+- Current implementation: exceptions thrown by send(...) are caught inside the invoker
+  and converted into a "FormationViolation" CallError, leading to a second send.
+  Therefore, ensure your send callback does not throw (e.g., guard std::promise::set_value()).
+
+Tips
+- Prefer semantic comparisons in tests:
+    json::parse(actual) == json::parse(expected)  // ignores object key order
+- Link with -pthread when using std::promise/std::future in
+*/
+
 class Router{
 public:
     using Json = nlohmann::json;

@@ -28,34 +28,6 @@ void Router::registerHandler(std::string action, std::function<OcppFrame(const C
     handlerMap[action] = std::move(handler);
 }
 
-// template<typename Tag, typename Req, typename Conf>
-// void Router::register_handler(Handler<Tag, Req, Conf> h)
-// {
-//     //use this handler to get a response for the incoming payload
-//     //attach that response to the map of handlers
-//     table_[OcppActionName<Tag>::value] = [h](const std::string& uniqueId,
-//                              const Json& payload,
-//                              std::function<void(std::string&&)> send) {
-//         try{
-//             auto req = payload.get<Req>();
-//             auto res = h(req);
-//             if( res ) {
-//                 Json reply = json::array({3, uniqueId, *res});
-//                 send(reply.dump());//dumpstr
-//             }
-//             else{
-//                 Json reply = json::array({4, uniqueId, "InternalError", *res.error(), json::object()});
-//                 send(reply.dump());
-//             }
-//         }catch(const std::exception &e){
-//             //send error response
-//             Json reply = json::array({4, uniqueId, "FormationViolation", e.what(), json::object()});
-//             send(reply.dump());
-//         }
-        
-//     };
-// }
-
 void Router::handle_incoming(std::string_view frame, std::function<void(std::string&&)> send)
 {
     //if its a frame, then i'd need to convert it to Call and get the action and index the map
@@ -94,17 +66,24 @@ void Router::handle_incoming(std::string_view frame, std::function<void(std::str
         std::string action = arr.at(2).get<std::string>();
         if( table_.find(action) != table_.end() )
         {
-            table_[action](arr.at(1), arr.at(3), send);
+            std::string msgId;
+            try{ msgId = arr.at(1).get<std::string>();} catch(...){ msgId.clear();}
+            Json payload = arr.at(3);
+
+            // table_[action](arr.at(1).get<std::string>(), arr.at(3), send);
+            table_[action](msgId, payload, send);
         }
         else
         {
             //create CallError indicating unknown action
             send_error(arr.at(1), "NotImplemented", "Unknown action: " + action, json::object(), send);
+            return;
         }
 
     }
     catch( const std::exception &e )
     {
+        std::cout<<"Router::handle_incoming caught exception: " << e.what() << "\n";
         send_error("", "FormationViolation", e.what(), json::object(), send);
     }
 

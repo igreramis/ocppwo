@@ -168,4 +168,24 @@ TEST_CASE("Router dispatches to correct handler") {
         REQUIRE_FALSE(authHandlerCalled);
         REQUIRE(std::holds_alternative<CallError>(frame));
     }
+
+    SECTION("Unknown action dispatch v2") {
+        std::string reply_;
+        auto done = std::make_shared<std::promise<void>>();
+        auto fut = done->get_future();
+
+        std::string frame = R"([2, "abc", "UnknownAction", {}])";
+        
+        router.handle_incoming(frame, [&reply_, done](std::string&& reply){
+            reply_ = reply;
+            try{
+                done->set_value();
+            }catch( std::exception &e){
+                std::cerr << "stdlib threw on promise set_value() threw : " << e.what() << std::endl;
+            }
+        });
+        REQUIRE_FALSE(bootHandlerCalled);
+        REQUIRE_FALSE(authHandlerCalled);
+        REQUIRE(reply_ == R"([4,"abc","NotImplemented","Unknown action: UnknownAction",{}])");
+    }
 }
