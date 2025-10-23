@@ -55,6 +55,26 @@ void to_json(json &j, const CallError& c)
     j = json::array({c.messageTypeId, c.messageId, c.errorCode, c.errorDescription, c.errorDetails});
 }
 
+/**
+ * from_json — BootNotification.req (OCPP 1.6J)
+ *
+ * Parses the BootNotification request payload, i.e. the 4th element of the Call frame:
+ *   [2, "<messageId>", "BootNotification", <payload>]
+ *
+ * Expected payload shape per OCPP 1.6J:
+ *   { "chargePointModel": "<string>", "chargePointVendor": "<string>" }
+ *
+ * Implementation details:
+ *   - Preferred: accepts the object form above (OCPP-compliant).
+ *   - Also supports a legacy array form: ["<model>", "<vendor>"] for compatibility.
+ *
+ * Behavior:
+ *   - Populates b.chargePointModel and b.chargePointVendor.
+ *   - Throws nlohmann::json::out_of_range if required keys/elements are missing.
+ *   - Throws nlohmann::json::type_error if values are not strings.
+ *
+ * Note: OCPP payloads are JSON objects; only the envelope is an array.
+ */
 void from_json(const json& j, BootNotification& b)
 {
     if( j.is_object() ) {
