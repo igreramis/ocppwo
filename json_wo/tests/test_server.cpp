@@ -54,22 +54,6 @@ void TestServer::start(){
                     });
                 });
 
-                // ss->on_call([this, wss](const Call& c, std::function<void(const OcppFrame& f)> respond){
-                //     std::cout << __func__ << "Received Call: " << c.action << "\n";
-                //     OcppFrame reply = router_.route(c);
-                //     if( c.action == "BootNotification" ) {
-                //         last_boot_msg_id_ = c.messageId;
-                //     }
-                //     if( c.action == "Authorize" ) {
-                //         return;
-                //     }
-                //     /* Given the nature of the test using the Ping packet, we don't need to reply with a response.*/
-                //     if( c.action == "Ping" ) {
-                //         return;
-                //     }
-                //     respond(reply);
-                // });
-
                 ss->on_close([this](){
                     std::cout << "Client disconnected\n";
                     std::lock_guard<std::mutex> lock(mtx_);

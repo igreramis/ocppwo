@@ -6,6 +6,7 @@
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
+using tcp = boost::asio::ip::tcp;
 
 struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   tcp::resolver res_;

@@ -3,7 +3,90 @@
 #include "router.hpp"
 #include "ocpp_model.hpp"
 #include <future>
+#include <boost/asio.hpp>
+#include <chrono>
+#include <thread>
+#include <string>
+#include "ws_client.hpp"
+#include "test_server.hpp"
+#include "session.hpp"
 // #include <catch2/catch.hpp>
+
+namespace beast = boost::beast;
+namespace websocket = beast::websocket;
+using tcp = boost::asio::ip::tcp;
+using namespace std;
+
+struct ClientUnderTest{
+    //provide a way to start the client pointing to ws:127.0.0.1:port
+    //and a way to stop it. This structd is a placeholder.
+    std::shared_ptr<WsClient> client_;
+    std::shared_ptr<Session> ss_;
+    std::weak_ptr<Session> wss_;
+    unsigned transport_max_writes_in_flight() const {
+        return client_->transport_max_writes_in_flight();
+    }
+
+    unsigned transport_max_write_queue_depth() const {
+        return client_->transport_max_write_queue_depth();
+    }
+
+    unsigned transport_current_write_queue_depth() const {
+        return client_->transport_current_write_queue_depth();
+    }
+
+    void start(boost::asio::io_context& io, std::string host, std::string port)
+    {
+        client_ = std::make_shared<WsClient>(io, host, port);
+        ss_ = std::make_shared<Session>(io, client_);
+        wss_= ss_;
+
+        // GTEST_LOG_(INFO) << "WebSocket client starting...";
+        
+        client_->on_close([this](){
+            if( auto ss = wss_.lock() ) {
+                ss->on_close();
+            }
+        });
+        
+        client_->on_connected([this](){
+            // GTEST_LOG_(INFO) << "WebSocket client connected...";
+            ss_->send_call(BootNotification{"X100", "OpenAI"},
+                    [this](const OcppFrame& f){
+                        if( std::holds_alternative<CallResult>(f) ) {
+                            auto r = std::get<CallResult>(f);
+                            // std::cout << "BootNotificationResponse: "<< r.payload << "\n";
+                            // GTEST_LOG_(INFO) << "BootNotificationResponse: "<< r.payload << "\n";
+                            BootNotificationResponse resp = r.payload;
+                            if (resp.status == "Accepted") {
+                                std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
+                                if (auto ss = wss_.lock()) {
+                                    ss->state = Session::State::Ready;
+                                    // start_heartbeat(resp.interval);
+                                    ss->start_heartbeat(resp.interval);
+                                }
+                                else {
+                                    std::cerr << "Session already destroyed, cannot set state to Ready\n";
+                                }
+                            } else if (resp.status == "Pending") {
+                                std::cout << "BootNotification pending, interval: " << resp.interval << "\n";
+                            } else {
+                                std::cout << "BootNotification rejected\n";
+                            }
+                        } else if (std::holds_alternative<CallError>(f)){
+                            const auto& e = std::get<CallError>(f);
+                            std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
+                        }
+                    });
+        });
+
+        ss_->start();
+    };
+    void stop()
+    {
+        client_->close();
+    };
+};
 
 TEST_CASE("Router dispatches to correct handler") {
     Router router;
@@ -268,5 +351,82 @@ TEST_CASE("Router dispatches to correct handler") {
         REQUIRE_FALSE(bootHandlerCalled);
         REQUIRE_FALSE(authHandlerCalled);
         REQUIRE(reply_ == R"([4,"abc","FormationViolation","[json.exception.out_of_range.403] key 'chargePointModel' not found",{}])");
+    }
+
+    SECTION("Back-to-Back dispatches"){
+        using namespace std::chrono_literals;
+        boost::asio::io_context ioc;
+
+        //Pick an ephemeral port
+        unsigned short port = 0;
+        {
+            tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+            port = tmp.local_endpoint().port();
+        }
+
+        TestServer server(ioc, port);
+        server.set_boot_conf("boot_msg_id", 2);
+        server.start();
+
+        ClientUnderTest cut;
+        cut.start(ioc, "127.0.0.1", std::to_string(port));
+
+        std::thread io_thread([&]{ ioc.run(); });
+
+        // ---- Wait for BootNotification to arrive at CSMS ----
+        std::string boot_id;
+        for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+            std::this_thread::sleep_for(100ms);
+            boot_id = server.last_boot_msg_id();
+            if( !boot_id.empty() ) break;
+        }
+
+        int N = 1000;
+        for( int i = 0; i < N; i++ ) {
+            json frame = json::array({2, std::to_string(i), "Ping", json::object({{"seq", i }})});
+            cut.client_->send(frame.dump());
+        }
+
+        std::this_thread::sleep_for(3s);
+
+        REQUIRE(cut.transport_max_writes_in_flight() <= 1u);
+        REQUIRE(cut.transport_max_write_queue_depth() > 0u);
+        REQUIRE(cut.transport_current_write_queue_depth() == 0u);
+        // EXPECT_GT(cut.transport_max_write_queue_depth(), 0u) << "Never observed queue growth; test may not have stressed the writer.";
+
+        // EXPECT_EQ(cut.transport_current_write_queue_depth(), 0u) << "Never observed current queue depth; test may not have stressed the writer.";
+
+        auto frames = server.received();
+        std::vector<int> seqs;
+
+        for( auto &frame : frames )
+        {
+            //how to convert string to json
+            auto a = json::parse(frame.text);
+            if( a.is_array() && a.size() > 3 && a[2] == "Ping" ) {
+                seqs.push_back(a[3].value("seq", -1));
+            }
+        }
+        REQUIRE(seqs.size() == N);
+
+        bool monotonic = true;
+        for( int i=1; i < seqs.size(); i++ ){
+            if( seqs[i] != seqs[i-1] + 1 ) {
+                monotonic = false;
+                break;
+            }
+        }
+        REQUIRE(monotonic);
+
+
+        //Cleanup
+        cut.stop();
+        server.stop();
+        ioc.stop();
+        if(io_thread.joinable() ) io_thread.join();
+
+        REQUIRE_FALSE(bootHandlerCalled);
+        REQUIRE_FALSE(authHandlerCalled);
+        // REQUIRE(reply_ == R"([4,"abc","FormationViolation","[json.exception.out_of_range.403] key 'chargePointModel' not found",{}])");
     }
 }

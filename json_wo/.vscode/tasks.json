@@ -85,10 +85,11 @@
             "tests/test_router.cpp",
             "router.cpp",
             "ocpp_model.cpp",
+            "${workspaceFolder}/tests/test_server.cpp",
             "-o",
             "tests/test_router",
             "-pthread",
-            // "-lstdc++fs" // remove if not needed
+            "-lboost_system",
             "&&",
             "./tests/test_router"
         ],
