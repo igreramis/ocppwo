@@ -99,6 +99,28 @@
         }
     },
     {
+        "label": "build and run fake timer tests",
+        "type": "shell",
+        "command": "g++",
+        "args": [
+            "-std=c++17",
+            "-I./include",
+            "${workspaceFolder}/tests/fake_timers.cpp",
+            "-o",
+            "tests/fake_timers",
+            "-lboost_system",
+            "-lgtest",
+            "-lgtest_main",
+            "-pthread",
+            "&&",
+            "./tests/fake_timers"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": false
+        }
+    },
+    {
       "label": "build-and-run-integration-tests",
       "type": "shell",
       "command": "g++",
