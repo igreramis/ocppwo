@@ -121,6 +121,52 @@
         }
     },
     {
+      "label": "build-reconnect (debug)",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-O0", "-g", "-rdynamic",
+        "-I", "${workspaceFolder}/include",
+        "${workspaceFolder}/tests/test_reconnect.cpp",
+        "${workspaceFolder}/router.cpp",
+        "${workspaceFolder}/ocpp_model.cpp",
+        "${workspaceFolder}/tests/test_server.cpp",
+        "-o", "${workspaceFolder}/tests/test_reconnect",
+        "-lboost_system",
+        "-lgtest",
+        "-lgtest_main",
+        "-pthread"
+      ],
+      "group": { "kind": "build", "isDefault": false },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+        "label": "build and run reconnect tests",
+        "type": "shell",
+        "command": "g++",
+        "args": [
+            "-std=c++17",
+            "-I./include",
+            "${workspaceFolder}/tests/test_reconnect.cpp",
+            "${workspaceFolder}/router.cpp",
+            "${workspaceFolder}/ocpp_model.cpp",
+            "${workspaceFolder}/tests/test_server.cpp",
+            "-o",
+            "tests/test_reconnect",
+            "-lboost_system",
+            "-lgtest",
+            "-lgtest_main",
+            "-pthread",
+            "&&",
+            "./tests/test_reconnect"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": false
+        }
+    },
+    {
       "label": "build-and-run-integration-tests",
       "type": "shell",
       "command": "g++",

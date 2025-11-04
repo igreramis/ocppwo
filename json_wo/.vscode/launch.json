@@ -1,6 +1,26 @@
 {
     "version": "0.2.0",
     "configurations": [
+      {
+        "name": "Debug: test_reconnect",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/tests/test_reconnect",
+        "args": [
+          // "--gtest_filter=Reconnect*"
+        ],
+        "cwd": "${workspaceFolder}",
+        "environment": [],
+        "stopAtEntry": false,
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "setupCommands": [
+          { "text": "catch throw" },
+          { "text": "handle SIGABRT stop pass print" }
+        ],
+        "preLaunchTask": "build-reconnect (debug)"
+      },
       // {
       //   "name": "Debug tcp_server",
       //   "type": "cppdbg",

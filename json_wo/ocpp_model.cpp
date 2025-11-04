@@ -104,9 +104,20 @@ void to_json(json& j, const BootNotificationResponse& r)
 
 void from_json(const json& j, BootNotificationResponse& r)
 {
-    r.currentTime = j.at(0);
-    r.interval = j.at(1);
-    r.status = j.at(2);
+    // r.currentTime = j.at(0);
+    // r.interval = j.at(1);
+    // r.status = j.at(2);
+    if(j.is_object()){
+        r.currentTime = j.at("currentTime");
+        r.interval = j.at("interval");
+        r.status = j.at("status");
+    }
+    else if( j.is_array())
+    {
+        r.currentTime = j.at(0);
+        r.interval = j.at(1);
+        r.status = j.at(2);
+    }
 }
 
 /**

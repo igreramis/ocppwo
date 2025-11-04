@@ -407,3 +407,139 @@ TEST(Reconnect, ResumeDelayRespectsPolicy) {
   EXPECT_TRUE(online);
   EXPECT_TRUE(rc.can_send());
 }
+
+// glue.hpp
+struct ReconnectGlue {
+  boost::asio::io_context& io;
+  std::shared_ptr<WsClient> ws;
+  ReconnectController rc;
+  std::unique_ptr<boost::asio::steady_timer> conn_timer;
+
+  ReconnectGlue(boost::asio::io_context& io_,
+                std::shared_ptr<WsClient> ws_,
+                ReconnectPolicy pol)
+    : io(io_), ws(std::move(ws_))
+    , rc(pol,
+         /* TransportOps */
+         TransportOps{
+           /* async_connect */
+           [this](const std::string& url, std::function<void(bool)> done) {
+             // (Optional) parse url into host/port if you create WsClient here.
+             // Here: ws is already constructed with host/port.
+
+             // One-shot latch so we call 'done' only once.
+             auto completed = std::make_shared<bool>(false);
+
+             // Bridge ws->on_connected to 'done(true)'
+             ws->on_connected([this, done, completed](){
+               if (*completed) return;
+               *completed = true;
+               if (conn_timer) conn_timer->cancel();
+               done(true);
+             });
+
+             // Bridge ws->on_close to 'done(false)' if connect not yet completed.
+             ws->on_close([this, done, completed](){
+               if (*completed) return;
+               *completed = true;
+               if (conn_timer) conn_timer->cancel();
+               done(false);
+             });
+
+             // Connection timeout as a fallback for resolve/handshake errors
+             conn_timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(5));
+             conn_timer->async_wait([done, completed](auto ec){
+               if (ec) return; // canceled by success/close
+               if (*completed) return;
+               *completed = true;
+               done(false);
+             });
+
+             // Kick off connect
+             ws->start(); // this will resolve/connect/handshake and then call on_connected() on success
+           },
+
+           /* async_close */
+           [this](std::function<void()> done) {
+             auto completed = std::make_shared<bool>(false);
+             // Ensure we call done() when closed
+             auto prev = ws->on_closed_; // if you need to chain, keep prior
+             ws->on_close([done, completed, prev](){
+               if (prev) prev();
+               if (*completed) return;
+               *completed = true;
+               done();
+             });
+             ws->close();
+           },
+
+           /* post_after */
+           [this](Ms d, std::function<void()> cb) {
+             auto t = std::make_shared<boost::asio::steady_timer>(io, d);
+             t->async_wait([t, cb = std::move(cb)](auto ec){ if (!ec) cb(); });
+           },
+
+           /* now */
+           []{ return Clock::now(); }
+         },
+         /* ReconnectSignals */
+         ReconnectSignals{}
+    )
+  {
+    // Feed WsClient events into the controller:
+    ws->on_connected([this]{ rc.on_transport_open(); });
+    ws->on_close([this]{ rc.on_transport_close(CloseReason::TransportError); });
+  }
+};
+
+// after rc reports on_connected (via ReconnectSignals or by observing rc.state())
+void start_ocpp_bringup(Session& session, ReconnectGlue& glue) {
+  // 1) Send BootNotification
+  session.send_call(BootNotification{/* fill your payload */},
+    // on_reply:
+    [&session, &glue](const OcppFrame& f) {
+      if (std::holds_alternative<CallResult>(f)) {
+        // 2) Mark controller online AFTER resume_delay
+        glue.rc.on_boot_accepted();
+        // 3) Start heartbeats (example: 30s)
+        session.start_heartbeat(30);
+      } else {
+        // Boot rejected? You may schedule retry or treat as transient.
+      }
+    }
+  );
+}
+
+boost::asio::io_context io;
+
+// Build transport and session
+auto ws = std::make_shared<WsClient>(io, "localhost", "8080");
+auto session = std::make_unique<Session>(io, ws);  // Session uses the same Transport impl
+
+// Build reconnect policy & glue
+ReconnectPolicy pol;
+pol.initial_backoff = Ms{500};
+pol.max_backoff     = Ms{30'000};
+pol.jitter_ratio    = 0.20f;
+pol.resume_delay    = Ms{250};
+
+ReconnectGlue glue{io, ws, pol};
+
+// Optional: observe controller signals (for logs/metrics)
+glue.rc = ReconnectController(
+  pol,
+  glue.rc/* existing ops */,
+  ReconnectSignals{
+    .on_connecting = []{ std::cout << "Connecting...\n"; },
+    .on_connected  = [&]{ std::cout << "Connected (transport up)\n"; start_ocpp_bringup(*session, glue); },
+    .on_online     = []{ std::cout << "Online (ok to send)\n"; },
+    .on_offline    = []{ std::cout << "Offline (gate sends)\n"; },
+    .on_closed     = [](CloseReason){ std::cout << "Closed\n"; },
+    .on_backoff_scheduled = [](Ms d){ std::cout << "Reconnect in " << d.count() << " ms\n"; },
+  }
+);
+
+// Kick off the controller (URL not used here; ws already has host/port)
+glue.rc.start("ws://localhost:8080");
+
+io.run();

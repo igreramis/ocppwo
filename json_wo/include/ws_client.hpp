@@ -1,3 +1,6 @@
+#ifndef WS_CLIENT_HPP
+#define WS_CLIENT_HPP
+
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/asio.hpp>
@@ -31,6 +34,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
       port_(std::move(port)),
       strand_(ws_.get_executor()) {}
 
+  //register callbacks to be called by this module for respective events
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
   void on_connected(std::function<void()> cb) { on_connected_ = std::move(cb); }
   void on_close(std::function<void()> cb) { on_closed_ = std::move(cb); }
@@ -160,3 +164,5 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     });
   }
 };
+
+#endif // WS_CLIENT_HPP
