@@ -152,6 +152,8 @@
             "${workspaceFolder}/router.cpp",
             "${workspaceFolder}/ocpp_model.cpp",
             "${workspaceFolder}/tests/test_server.cpp",
+            "${workspaceFolder}/tests/test_client.cpp",
+            "${workspaceFolder}/tests/test_harness.cpp",
             "-o",
             "tests/test_reconnect",
             "-lboost_system",

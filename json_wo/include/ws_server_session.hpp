@@ -1,3 +1,4 @@
+#pragma once
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/asio.hpp>
@@ -17,6 +18,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   std::function<void(const Call&, std::function<void(const OcppFrame&)>)> on_call_;
   std::deque<std::shared_ptr<std::string>> write_queue_;
   bool write_in_progress_ = false;
+  enum class WsServerSessionState {Disconnected, Connected} state_{WsServerSessionState::Disconnected};
 
   WsServerSession(tcp::socket s) : ws_(std::move(s)) {
   }
@@ -31,6 +33,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
         std::cerr << "WebSocket accept error: " << ec.message() << "\n";
         return;
       }
+      state_ = WsServerSessionState::Connected;
       std::cout<<"WebSocket handshake accepted"<<std::endl;
       do_read();
     });
@@ -39,8 +42,8 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
     auto self = shared_from_this();
     ws_.async_read(buffer_, [this,self](auto ec, std::size_t){
       if (ec) {
-        std::cerr << "WebSocket read error: " << ec.message() << "\n";
-        if( on_closed_ ) on_closed_();
+        std::cerr << "Server WebSocket read error: " << ec.message() << "\n";
+        if( (state_ != WsServerSessionState::Disconnected) && on_closed_ ) on_closed_();
         return;
       }
       std::string text = beast::buffers_to_string(buffer_.data());
@@ -107,7 +110,8 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   void close() override {
     auto self = shared_from_this();
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
-        std::cout << "WebSocket closed\n";
+        state_ = WsServerSessionState::Disconnected;
+        std::cout << "Server WebSocket closed\n";
         if( on_closed_ ) on_closed_();
     });
   }

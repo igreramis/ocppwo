@@ -32,6 +32,11 @@ struct Session {
 
     std::unique_ptr<boost::asio::steady_timer> timer;
 
+    std::function<void()> on_heartbeat_response_;
+    void on_heartbeat_response(std::function<void()> cb){
+        on_heartbeat_response_ = std::move(cb);
+    }
+
     void start(void)
     {
         transport->start();
@@ -70,7 +75,7 @@ struct Session {
  *
  * Parameters:
  *  - p: payload to be wrapped into a Call (any type serializable by json(c)).
- *  - on_reply: callback invoked when a reply is received or on error/timeout.
+ *  - on_reply: completion callback invoked when a reply is received or on error/timeout.
  *              The callback receives an OcppFrame which will be either CallResult
  *              (successful reply) or CallError (error, timeout, or connection closed).
  *  - timeout: optional timeout duration after which a synthetic CallError is delivered
@@ -159,6 +164,8 @@ struct Session {
     }
   }
 
+  //TODO: shouldn't there be a on_connected() here? that indicates a new client
+  //has connected and we need to create a session for it?
   void on_close()
   {
     state = State::Disconnected;

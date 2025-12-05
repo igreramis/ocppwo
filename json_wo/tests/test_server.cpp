@@ -22,6 +22,10 @@ void TestServer::start(){
             if (!ec) {
                 std::cout << "New client connected from " << s.remote_endpoint() << "\n";
 
+                //over here should be a method call for things to do once client connected.
+                received_.clear();
+                heartbeats_.clear();
+
                 ss = std::make_shared<WsServerSession>(std::move(s));
                 std::weak_ptr<WsServerSession> wss = ss;
                 ss->on_message([this, wss](std::string_view msg){
@@ -30,7 +34,6 @@ void TestServer::start(){
                     {
                         std::lock_guard<std::mutex> lock(mtx_);
                         received_.push_back(Frame{std::string(msg), now});
-
                         json j = json::parse(std::string(msg));
                         OcppFrame f = parse_frame(j);
                         if( std::holds_alternative<Call>(f) ) {
@@ -54,10 +57,12 @@ void TestServer::start(){
                     });
                 });
 
+                // handle the signal/callback from WsServerSession when the connection has been closed
                 ss->on_close([this](){
                     std::cout << "Client disconnected\n";
                     std::lock_guard<std::mutex> lock(mtx_);
                     client_disconnected = true;
+                    last_boot_msg_id_.clear();
                 });
 
                 ss->start();

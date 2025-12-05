@@ -6,6 +6,7 @@
 #include <boost/asio.hpp>
 #include <deque>
 #include "transport.hpp"
+#include "signals.hpp"
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -25,6 +26,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   bool write_in_progress_ = false;
   std::atomic<unsigned> writes_in_flight_{0}, max_writes_in_flight_{0};
   std::atomic<unsigned> max_write_queue_depth_{0}, current_write_queue_depth_{0};
+  enum class WsClientState {Disconnected, Connected, Connecting} state_{WsClientState::Disconnected};
 
 
   WsClient(boost::asio::io_context& io, std::string host, std::string port)
@@ -36,8 +38,43 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
 
   //register callbacks to be called by this module for respective events
   void on_message(std::function<void(std::string_view)> cb) override { on_msg_ = std::move(cb); }
-  void on_connected(std::function<void()> cb) { on_connected_ = std::move(cb); }
-  void on_close(std::function<void()> cb) { on_closed_ = std::move(cb); }
+  
+  signals::Signals<> on_connected_sig;
+  // on_connected(cb)
+  // - Public API to subscribe to the "connected" event.
+  // - First call lazily sets on_connected_ to a small dispatcher that, when invoked
+  //   (after successful handshake in start()), emits on_connected_sig to notify all subscribers.
+  // - Every call adds cb to on_connected_sig; subscriptions accumulate (not overwritten).
+  //
+  // on_connected_
+  // - Internal trigger (std::function<void()>) invoked by start() once the WebSocket
+  //   handshake completes. It calls on_connected_sig.emit().
+  //
+  // on_connected_sig
+  // - Lightweight signal/slot registry holding all callbacks registered via on_connected().
+  //   emit() invokes all registered callbacks. No ordering guarantees; not thread-safe.
+  void on_connected(std::function<void()> cb) {
+    // if( !on_connected_ ) {
+    //   on_connected_ = [this](){
+    //     this->on_connected_sig.emit();
+    //   };
+    // } 
+    // on_connected_sig.connect(std::move(cb));
+    on_connected_ = std::move(cb);
+  };
+
+  signals::Signals<> on_closed_sig;
+  // Similar to on_connected, but for the "closed" event.
+  void on_close(std::function<void()> cb) { 
+    // if(!on_closed_)
+    // {
+    //   on_closed_ = [this](){
+    //     this->on_closed_sig.emit();
+    //   };
+    // }
+    // on_closed_sig.connect(std::move(cb));
+    on_closed_ = std::move(cb); 
+  }
 
   unsigned transport_max_writes_in_flight() const {
     return max_writes_in_flight_.load();
@@ -69,18 +106,20 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         }
 
         std::cout<<"Connected.\n";
+        state_  = WsClientState::Connecting;
 
         ws_.async_handshake(host_, "/", [this,self](auto ec){
           if (ec) {
             std::cerr << "WebSocket handshake error: " << ec.message() << "\n";
             return;
           }
-          
+
+          state_ = WsClientState::Connected;
           std::cout << "Handshake complete!\n";
 
           ws_.text(true);
           
-          //connect and boot
+        //connect and boot
         //   send("BootNotification or your initial message");
           if( on_connected_ ) on_connected_();
 
@@ -94,10 +133,12 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     auto self = shared_from_this();
     ws_.async_read(buffer_, [this,self](auto ec, std::size_t){
       if (ec) {
-        std::cerr << "WebSocket read error: " << ec.message() << "\n";
-        
-        if( on_closed_ ) on_closed_();
-        
+        std::cerr << "Client WebSocket read error: " << ec.message() << "\n";
+
+        if( (state_ != WsClientState::Disconnected) && on_closed_ ) {
+          on_closed_();
+        }
+
         return;
       }
       std::string text = beast::buffers_to_string(buffer_.data());
@@ -159,8 +200,11 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   void close() override {
     auto self = shared_from_this();
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
+        state_ = WsClientState::Disconnected;
         std::cout << "WebSocket closed\n";
-        if( on_closed_ ) on_closed_();
+        if( on_closed_ ) {
+          on_closed_();
+        }
     });
   }
 };
