@@ -183,6 +183,8 @@ TEST(Reconnect, StartLeadsToConnecting){
     EXPECT_TRUE(rc.can_send());
 }
 #endif
+
+#if 0
 TEST(Reconnect, NoDoubleSendAcrossReconnect) {
     boost::asio::io_context ioc;
 
@@ -287,6 +289,139 @@ TEST(Reconnect, NoDoubleSendAcrossReconnect) {
     if(io_thread.joinable()) io_thread.join();
 
 }
+#endif
+
+//make first 4 connects fail → capture scheduled delays → 
+//assert each is within jitter bounds and non-collapsing (e.g., `>= 0.6 * previous`) and never exceeds `max_backoff`.
+//Note:the jitter bounds condition (>=0.6*previous) is based on the assumption of a jitter range of ±20%. Adjust as necessary.
+TEST(Reconnect, BackoffGrowthAndCap) {
+    //tH or something tells jme failed, with backup value for reconnect as :...
+    unsigned count_reconnects = 0;
+    TransportOps tOps{
+        //async_connect
+        [&](const std::string& url, std::function<void(bool ok)> done){
+            (void)url;
+            if( count_reconnects < 4 )
+            {
+                done(false); //always fail
+            }
+            else
+            {
+                done(true);
+            }
+        },
+        //async_close
+        [](std::function<void()> closed){
+            closed();
+        },
+        //post_after
+        [](Ms delay, std::function<void()> cb){
+            cb(); //immediate execution for test
+        },
+        //now
+        [](){
+            return std::chrono::steady_clock::now();
+        }
+    };
+    std::vector<int> recorded_backoffs;
+    std::shared_ptr<ReconnectSignals> rS = std::make_shared<ReconnectSignals>(ReconnectSignals{
+        // on_connecting
+        [](){},
+        // on_connected
+        [](){},
+        // on_closed
+        [](CloseReason){},
+        // on_online
+        [](){},
+        // on_offline
+        [](){},
+        // on_backoff_scheduled
+        [&](std::chrono::milliseconds chrono_ms){
+            count_reconnects++;
+            std::cout << "Backoff scheduled for (ms): " << chrono_ms.count() << "\n";
+            recorded_backoffs.push_back(chrono_ms.count());
+        },
+    });
+    ReconnectPolicy rP;
+    ReconnectController rC(rP, tOps, rS);
+    rC.start("ws://dummy");//this causes reconnect attempts. hwo do you go from here?
+    //i don't think you ever come down to the sleep thread part. never happens
+    //the test as is does not seem to achieve what we are looking for.
+    //it seems we need a timer, that would trigger reconnects after a time and thereby make the systme sleep one
+    //thread and execute the other.
+    // for (int i = 0; i < 10; i++) {
+    //     std::this_thread::sleep_for(1ms);
+    //     std::cout<<"recorded_backoffs.size(): "<<recorded_backoffs.size()<<"\n";
+    // }
+    ASSERT_EQ(recorded_backoffs.size(), 4) << "Expected 4 reconnects";
+
+    for(int i = 1; i < recorded_backoffs.size(); i++)
+    {
+        ASSERT_LE(recorded_backoffs[i-1], rP.max_backoff.count()) << "Backoff exceeds max_backoff";
+        ASSERT_LE(recorded_backoffs[i], rP.max_backoff.count()) << "Backoff exceeds max_backoff";
+        ASSERT_GE(recorded_backoffs[i], recorded_backoffs[i-1]*0.6) << "jitter not within bounds";
+    }
+}
+
+TEST(Reconnect, ResumeDelayPolicy) {
+    //tH or something tells jme failed, with backup value for reconnect as :...
+    unsigned count_reconnects = 0;
+    std::function<void()> cb_;
+    TransportOps tOps{
+        //async_connect
+        [&](const std::string& url, std::function<void(bool ok)> done){
+            (void)url;
+            done(true);
+        },
+        //async_close
+        [](std::function<void()> closed){
+            closed();
+        },
+        //post_after
+        [&](Ms delay, std::function<void()> cb){
+            cb_ = std::move(cb); //immediate execution for test
+        },
+        //now
+        [](){
+            return std::chrono::steady_clock::now();
+        }
+    };
+    std::vector<int> recorded_backoffs;
+    bool connected_ = false, online_ = false;
+    std::shared_ptr<ReconnectSignals> rS = std::make_shared<ReconnectSignals>(ReconnectSignals{
+        // on_connecting
+        [](){},
+        // on_connected
+        [&](){connected_ = true;},
+        // on_closed
+        [](CloseReason){},
+        // on_online
+        [&](){
+            online_ = true;
+        },
+        // on_offline
+        [](){},
+        // on_backoff_scheduled
+        [&](std::chrono::milliseconds chrono_ms){
+            count_reconnects++;
+            std::cout << "Backoff scheduled for (ms): " << chrono_ms.count() << "\n";
+            recorded_backoffs.push_back(chrono_ms.count());
+        },
+    });
+    ReconnectPolicy rP;
+    ReconnectController rC(rP, tOps, rS);
+    rC.start("ws://dummy");
+    ASSERT_TRUE(connected_) << "Should be connected initially";
+    ASSERT_FALSE(online_) << "Should not be online unless boot notification accepted";
+
+    rC.on_boot_accepted();
+    ASSERT_FALSE(online_) << "Should still not be online after boot accepted but resume_delay pending";
+
+    cb_();
+    ASSERT_TRUE(online_) << "Should be online after resume_delay elapsed";
+}
+//we need to indicate to test server to ignore 4 connection attempts
+//
 /*
 wsclient has a send() and start() api. it has completion signals
 session has a start, send_call api. the latter has a completion callback

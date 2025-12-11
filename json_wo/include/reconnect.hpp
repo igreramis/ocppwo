@@ -28,7 +28,7 @@ struct ReconnectSignals {
   std::function<void(CloseReason)> on_closed;
   std::function<void()> on_online;
   std::function<void()> on_offline;
-  std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;
+  std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;// Notifies observers when a backoff delay is computed and scheduled. Receives the delay (ms). Called after compute_backoff_ and posting the timer; handler should be quick/non‑blocking.
 };
 
 // TransportOps — inbound operations/events into ReconnectController
@@ -41,8 +41,13 @@ struct TransportOps {
   std::function<std::chrono::steady_clock::time_point()> now;
 };
 
+
 class ReconnectController {
     public:
+        // ReconnectSignals — outbound notifications from ReconnectController
+        // - External actors assign these std::function callbacks (observers).
+        // - Controller holds a shared_ptr to allow the glue/tests to own/modify callbacks
+        //   after construction and to ensure a stable lifetime.
         ReconnectController(ReconnectPolicy r, TransportOps t, std::shared_ptr<ReconnectSignals> rS)
          :rp(r), tOps(std::move(t)), rSigs(std::move(rS)) {};
 
@@ -123,11 +128,32 @@ class ReconnectController {
         // accepted. Controller can mark the logical channel online and emit
         // rSigs->on_online.
         void on_boot_accepted(){
-            online_ = true;
-            if(rSigs->on_online)
+            //online should be flagged on after resume_delay time units
+            if( tOps.post_after)
             {
-                rSigs->on_online();
+                tOps.post_after(rp.resume_delay, [this](){
+                    online_ = true;
+                    if( rSigs->on_online )
+                    {
+                        rSigs->on_online();
+                    }
+                });
             }
+            else
+            {
+                online_ = true;
+                if( rSigs->on_online )
+                {
+                    rSigs->on_online();
+                }
+            }
+            // tOps.post_after(rp.resume_delay, [this](){
+
+            // });
+            // if(rSigs->on_online)
+            // {
+            //     rSigs->on_online();
+            // }
         };
         bool can_send() const{
             return online_ && (cS_ == ConnState::Connected);
@@ -163,7 +189,11 @@ class ReconnectController {
         // Input: attempt (1 = first retry attempt after initial failure; <=0 treated as 0/1).
         // Output: milliseconds duration in [0, max_backoff].
         void try_reconnect_(){
+            if( cS_ != ConnState::Disconnected )
+                return;
+
             std::cout<<"Reconnect starting..."<<"\n";
+            
             cS_ = ConnState::Connecting;
 
             if(rSigs->on_connecting)
@@ -171,18 +201,55 @@ class ReconnectController {
                 rSigs->on_connecting();
             }
 
-            tOps.async_connect(url_, [this](bool ok){
-                if(ok)
-                {
-                    on_transport_open();
-                }
-                else
-                {
-                    schedule_reconnect_();
-                }
-            });
+            if(tOps.async_connect)
+            {
+                tOps.async_connect(url_, [this](bool ok){
+                    if(ok)
+                    {
+                        on_transport_open();
+                    }
+                    else
+                    {
+                        cS_ = ConnState::Disconnected;
+                        schedule_reconnect_();
+                    }
+                });
+            }
 
         }
+
+        // compute_backoff_(attempt)
+        // Purpose:
+        //   Compute the delay to wait before the next reconnect attempt.
+        //
+        // Behavior summary:
+        //   - Base delay is rp.initial_backoff.
+        //   - Exponential growth: each successive attempt (as passed in `attempt`) doubles
+        //     the delay (subject to clamping). With the current shift logic:
+        //       attempt==0 -> initial_backoff
+        //       attempt==1 -> initial_backoff(first two attempts are non-exponential to deal with transient network failures before escalating the situation to exponentials)
+        //       attempt==2 -> 2 * initial_backoff
+        //       attempt==3 -> 4 * initial_backoff
+        //       attempt==n -> initial_backoff * 2^(n-2)  (for n>=2)
+        //     (In short: delays grow exponentially with doubling on successive retries;
+        //      the function treats the first two attempt values as the initial interval.)
+        //   - The computed delay is clamped to rp.max_backoff to avoid overflow/growth beyond cap.
+        //   - Jitter: a symmetric random jitter of ±rp.jitter_ratio is applied, i.e.
+        //       delay *= (1.0 + signed_frac)  where signed_frac ∈ [ -jitter_ratio, +jitter_ratio ].
+        //     The function uses a thread_local PRNG for the random component.
+        //   - Large attempt values are saturated to avoid undefined shifts (shift > 63 -> use cap).
+        //
+        // Inputs:
+        //   attempt  index describing which retry is being computed (caller-defined semantics).
+        //
+        // Output:
+        //   std::chrono::milliseconds value in [0, rp.max_backoff] (after jitter & clamping).
+        //
+        // Notes:
+        //   - The function is effectively pure except for the RNG (it returns non-deterministic
+        //     results because of jitter).
+        //   - If you want the first retry to be different, adjust the mapping from `attempt` to
+        //     exponent (the current code treats attempt==0/1 as the initial interval).
         Ms compute_backoff_(int attempt) const {
             uint64_t base_64 = static_cast<uint64_t>(rp.initial_backoff.count());
             uint64_t cap_64 = static_cast<uint64_t>(rp.max_backoff.count());
@@ -227,6 +294,14 @@ class ReconnectController {
 
             last_backoff_ = compute_backoff_(attempt_++);
 
+            //if we don't have to be a fucking nazi about indicating before or after
+            //posting the reconnect that the reconnect has been posted, we can just
+            //post it here
+            if( rSigs->on_backoff_scheduled )
+            {
+                rSigs->on_backoff_scheduled(last_backoff_);
+            }
+
             if( tOps.post_after )
             {
                 tOps.post_after(last_backoff_,[this](){
@@ -242,10 +317,10 @@ class ReconnectController {
                 reconnect_scheduled_ = false;
             }
 
-            if( rSigs->on_backoff_scheduled )
-            {
-                rSigs->on_backoff_scheduled(last_backoff_);
-            }
+            // if( rSigs->on_backoff_scheduled )
+            // {
+            //     rSigs->on_backoff_scheduled(last_backoff_);
+            // }
         };
 };
 

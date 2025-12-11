@@ -21,6 +21,8 @@ public:
     void trigger_boot();
     bool is_online() const;
     void enable_heartbeats(bool enable);
+    bool get_backoff_time(int64_t& time_ms);
+    // std::function<void(int time_ms)> rescheduled_with_backoff;
 // private:
     boost::asio::io_context& io_;
     std::string host_;
@@ -31,6 +33,8 @@ public:
     std::shared_ptr<ReconnectGlue> rcg_;
     bool online_{false};
     int heartbeat_interval_s{0};
+    int64_t backoff_in_ms{0};
+    bool backoff_scheduled_{false};
 
     unsigned transport_max_writes_in_flight() const;
     unsigned transport_max_write_queue_depth() const;

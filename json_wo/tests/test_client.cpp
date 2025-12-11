@@ -57,6 +57,7 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
     };
 
     rcg_->rS->on_backoff_scheduled = [this](std::chrono::milliseconds backoff){
+        backoff_scheduled_ = true; backoff_in_ms = backoff.count();
         std::cout << "ReconnectController: backoff scheduled for " << backoff.count() << " ms\n";
     };
 }
