@@ -90,23 +90,35 @@ struct ClientUnderTest{
     };
 };
 
-struct TimerPump {
+struct TimerPump{
     struct Item{
-        Ms delay;
+        std::chrono::milliseconds delay;
         std::function<void()> cb;
     };
-    
-    std::vector<Item> pump;
+    std::vector<Item> timers;
 
-    void post_after(Ms delay, std::function<void()> cb){
-        pump.push_back({delay, cb});
-    };
-
-    void run_all() {
-        for(auto& entry: pump){
-            entry.cb();
+    void post_after(std::chrono::milliseconds ms, std::function<void()> cb){
+        timers.push_back({ms, std::move(cb)});
+    }
+    void run_all(){
+        for(auto& timer: timers){timer.cb();}
+        timers.clear();
+    }
+    template<class Pred>
+    void run_while(Pred p){
+        while(p() && !timers.empty()){
+            auto it = timers.front();
+            timers.erase(timers.begin());
+            it.cb();
         }
-        pump.clear();
+    }
+
+};
+
+struct FakeClock{
+    std::chrono::steady_clock::time_point now{std::chrono::steady_clock::now()};
+    std::chrono::steady_clock::time_point operator()() const {
+        return now;
     }
 };
 
