@@ -36,7 +36,7 @@ struct ClientUnderTest{
     {
         client_ = std::make_shared<WsClient>(io, host, port);
         ss_ = std::make_shared<Session>(io, client_); wss_= ss_;
-        rcg_ = std::make_shared<ReconnectGlue>(client_, ss_);
+        rcg_ = ReconnectGlue::create(client_, ss_);
 
         rcg_->rS->on_connected = [this](){
             std::cout << "ReconnectController: websocket connected" << "\n";
@@ -48,7 +48,7 @@ struct ClientUnderTest{
                     BootNotificationResponse resp = r.payload;
                     if (resp.status == "Accepted") {
 
-                        rcg_->rC.on_boot_accepted();
+                        rcg_->rC->on_boot_accepted();
                         
                         std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
                         if (auto ss = wss_.lock()) {
@@ -76,11 +76,7 @@ struct ClientUnderTest{
             ss_->on_close();
         };
 
-        rcg_->rC.start(host+port);
-
-        //if start returns status closed, it indicates event where while connecting
-        //websocket, connection closed. this is different from an ongoing connection
-        //getting closed.
+        rcg_->rC->start(host+port);
 
     };
 
@@ -297,7 +293,7 @@ TEST(Reconnect, NoDoubleSendAcrossReconnect) {
     //force close the client connection
     tH.server_force_close();
 
-    ioc.stop();
+    ioc.stop();G51
     if(io_thread.joinable()) io_thread.join();
 
 }
@@ -327,8 +323,14 @@ TEST(Reconnect, BackoffGrowthAndCap) {
             closed();
         },
         //post_after
-        [](Ms delay, std::function<void()> cb){
+        [](Ms delay, std::function<void()> cb)->uint64_t{
             cb(); //immediate execution for test
+            return 0;
+        },
+        //cancel_after
+        [](uint64_t id)->bool{
+            (void)id;
+            return true;
         },
         //now
         [](){
@@ -355,8 +357,9 @@ TEST(Reconnect, BackoffGrowthAndCap) {
         },
     });
     ReconnectPolicy rP;
-    ReconnectController rC(rP, tOps, rS);
-    rC.start("ws://dummy");//this causes reconnect attempts. hwo do you go from here?
+    std::shared_ptr<ReconnectController> rC = std::make_shared<ReconnectController>(rP, tOps, rS);
+
+    rC->start("ws://dummy");//this causes reconnect attempts. hwo do you go from here?
     //i don't think you ever come down to the sleep thread part. never happens
     //the test as is does not seem to achieve what we are looking for.
     //it seems we need a timer, that would trigger reconnects after a time and thereby make the systme sleep one
@@ -390,8 +393,14 @@ TEST(Reconnect, ResumeDelayPolicy) {
             closed();
         },
         //post_after
-        [&](Ms delay, std::function<void()> cb){
+        [&](Ms delay, std::function<void()> cb)->uint64_t{
             cb_ = std::move(cb); //immediate execution for test
+            return 0;
+        },
+        //cancel_after
+        [](uint64_t id)->bool{
+            (void)id;
+            return true;
         },
         //now
         [](){
@@ -421,64 +430,15 @@ TEST(Reconnect, ResumeDelayPolicy) {
         },
     });
     ReconnectPolicy rP;
-    ReconnectController rC(rP, tOps, rS);
-    rC.start("ws://dummy");
+    // ReconnectController rC(rP, tOps, rS);
+    std::shared_ptr<ReconnectController> rC = std::make_shared<ReconnectController>(rP, tOps, rS);
+    rC->start("ws://dummy");
     ASSERT_TRUE(connected_) << "Should be connected initially";
     ASSERT_FALSE(online_) << "Should not be online unless boot notification accepted";
 
-    rC.on_boot_accepted();
+    rC->on_boot_accepted();
     ASSERT_FALSE(online_) << "Should still not be online after boot accepted but resume_delay pending";
 
     cb_();
     ASSERT_TRUE(online_) << "Should be online after resume_delay elapsed";
 }
-//we need to indicate to test server to ignore 4 connection attempts
-//
-/*
-wsclient has a send() and start() api. it has completion signals
-session has a start, send_call api. the latter has a completion callback
-reconnect has a series of public apis. they report back via completion signals
-    -internally, reconnect calls methods from wsclient and ties its completion signals
-    with its own completion callbacks
-    -
-rescheduling feature:
-    if connect !successful, fireup a timer with a fixed timeout and once it expires
-    try connecting again
-        timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(interval));
-        timer->async_wait([interval, this](auto ec);
-
-struct TimerPump {
-  // A tiny manual scheduler for deterministic tests.
-  struct Item { ocppwo::Ms delay; std::function<void()> cb; };
-  std::vector<Item> q;
-
-  void post_after(ocppwo::Ms d, std::function<void()> cb) { q.push_back({d, std::move(cb)}); }
-  void run_all() { for (auto& it : q) it.cb(); q.clear(); }
-  template<class Pred>
-  void run_while(Pred p) {
-    // In a real test, advance fake time and trigger due timers in order
-    while (p() && !q.empty()) { auto it = q.front(); q.erase(q.begin()); it.cb(); }
-  }
-};
-//what does TimerPump do:
-/*  an entry is defined as 
-        containing Ms
-        containing std::function<void()>
-    it stores entreis in a vector from the rear end.
-    it has a post_after api that adds entry into the vector
-    it has a run_all() api that executes each entry and then clears the vector.
- */
-/*
-    when the test closes you have pending outgoing frames
-        how do you simulate this?
-        you start sending a ton of frames and then suddently close the connection
-        or you create a queue of pending outgoing frames, send them out with delay
-        and then close the connection and see how the system deals with them?
-
-    create a test harness
-        -that starts a server for test
-        -that starts a client under test
-        -go from there...
-    
-
- */

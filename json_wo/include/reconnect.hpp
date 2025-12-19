@@ -37,12 +37,13 @@ struct ReconnectSignals {
 struct TransportOps {
   std::function<void(const std::string& url, std::function<void(bool ok)>)> async_connect;
   std::function<void(std::function<void()>)> async_close;
-  std::function<void(std::chrono::milliseconds, std::function<void()>)> post_after;
+  std::function<uint64_t(std::chrono::milliseconds, std::function<void()>)> post_after;
+  std::function<bool(uint64_t)> cancel_after;
   std::function<std::chrono::steady_clock::time_point()> now;
 };
 
 
-class ReconnectController {
+class ReconnectController : public std::enable_shared_from_this<ReconnectController> {
     public:
         // ReconnectSignals — outbound notifications from ReconnectController
         // - External actors assign these std::function callbacks (observers).
@@ -52,14 +53,24 @@ class ReconnectController {
          :rp(r), tOps(std::move(t)), rSigs(std::move(rS)) {};
 
         /**
-         * start — Begin establishing an OCPP transport connection.
+         * start(const std::string& url)
          *
-         * Input:
-         *   url  Endpoint passed to TransportOps::async_connect.
+         * Brief:
+         *   Begin the reconnect controller's connect flow for the given endpoint.
          *
-         * Return(Signals):
-         *   - Success: rSigs.on_connected()
-         *   - On Failure: nothing
+         * Trigger:
+         *   Called by the glue/harness to request that the controller establish a transport.
+         *
+         * Purpose:
+         *   - Record the target URL and, if the controller is idle (Disconnected),
+         *     kick off the first asynchronous connect attempt via try_reconnect_().
+         *   - The method itself is non‑blocking; progress and outcomes are reported
+         *     via ReconnectSignals (on_connecting, on_connected, on_backoff_scheduled, on_closed, etc.).
+         *
+         * Semantics / constraints:
+         *   - No‑op if the controller is not in ConnState::Disconnected.
+         *   - Does not perform higher‑level protocol actions (boot/resume); those are handled by callers.
+         *   - Must be invoked on the same execution context or otherwise synchronized with TransportOps.
          */
         void start(const std::string& url){
             url_ = url;
@@ -79,6 +90,16 @@ class ReconnectController {
                     cS_ = ConnState::Disconnected;
                 });
             }
+
+            //tOps.post_after_close(id);
+            //tOps.pending_timers_clear()
+            //post_after timers reschedule. but, they reschedule only if in a certain
+            //strate, that could be disconnected or connecting. either ways, you should
+            //cancel the timers
+            //post_after should return a timer handler that can be placed in a vector
+            //or something and then cleared once the timer executes?
+            //or there shold be a mechanimsin place for in rcg or tops?
+            //threading is a big issue here
 
             reconnect_scheduled_ = false;
         };
@@ -131,11 +152,23 @@ class ReconnectController {
             //online should be flagged on after resume_delay time units
             if( tOps.post_after)
             {
-                tOps.post_after(rp.resume_delay, [this](){
-                    online_ = true;
-                    if( rSigs->on_online )
+                // tOps.post_after(rp.resume_delay, [this](){
+                //     online_ = true;
+                //     if( rSigs->on_online )
+                //     {
+                //         rSigs->on_online();
+                //     }
+                // });
+
+                std::weak_ptr<ReconnectController> wk = this->weak_from_this();
+                tOps.post_after(rp.resume_delay, [wk](){
+                    if(auto s = wk.lock() )
                     {
-                        rSigs->on_online();
+                        s->online_ = true;
+                        if( s->rSigs->on_online )
+                        {
+                            s->rSigs->on_online();
+                        }
                     }
                 });
             }
@@ -180,14 +213,33 @@ class ReconnectController {
         bool online_{false}, reconnect_scheduled_{false};
         Ms last_backoff_;
 
-        // compute_backoff_(attempt)
-        // Purpose: derive the delay before the next reconnect attempt.
-        // Logic:
-        //   1. Start from initial_backoff.
-        //   2. Exponential doubling (base * 2^(attempt-1)) with saturation at max_backoff.
-        //   3. Apply symmetric jitter (±jitter_ratio) so average delay remains unbiased.
-        // Input: attempt (1 = first retry attempt after initial failure; <=0 treated as 0/1).
-        // Output: milliseconds duration in [0, max_backoff].
+        /*
+        * try_reconnect_()
+        *
+        * Brief:
+        *   Drive a single asynchronous connect attempt when the controller is idle.
+        *
+        * Trigger:
+        *   Called by start(), by the post_after timer handler (schedule_reconnect_),
+        *   or by other internal logic to initiate the next connect attempt. Progress
+        *   is reported by ReconnectSignals on_connecting
+        *
+        * Purpose:
+        *   - Transition controller to Connecting, emit on_connecting, and invoke
+        *     TransportOps.async_connect(url, completion).
+        *   - On success -> treat transport as open (on_transport_open()).
+        *   - On failure -> mark Disconnected and arrange a backoff via schedule_reconnect_().
+        * 
+        *  Return:
+        *   vai ReconnectSignals (on_connecting)
+        *
+        * Semantics / constraints:
+        *   - Non‑blocking: returns immediately; completion is delivered by the provided callback.
+        *   - Idempotent guard: only attempts when in the Disconnected state.
+        *   - Must be invoked on the same execution context / strand used by TransportOps
+        *     (or be externally synchronized) to avoid races with transport callbacks.
+        *   - Does not perform higher‑level protocol steps (boot/resume); those are handled elsewhere.
+        */
         void try_reconnect_(){
             if( cS_ != ConnState::Disconnected )
                 return;
@@ -259,7 +311,7 @@ class ReconnectController {
             {
                 delay_64 = cap_64;
             }
-            else if( delay_64 > cap_64>>shift )
+            else if( delay_64 > cap_64>>shift )//before increasing exponentially, check if exponential increase would exceed the cap
             {
                 delay_64 = cap_64;
             }
@@ -276,6 +328,41 @@ class ReconnectController {
             return Ms{ static_cast<Ms::rep>(backoff) };
         }
 
+        /*
+        * schedule_reconnect_()
+        *
+        * Brief:
+        *   Compute and schedule the next reconnect attempt using the controller's
+        *   backoff policy, and notify observers that a backoff was chosen.
+        *
+        * Trigger:
+        *   Called when a connect attempt fails or the transport closes and the
+        *   controller decides to retry (e.g. from try_reconnect_(), on_transport_close()).
+        *
+        * Purpose:
+        *   - Guard against duplicate scheduling (idempotent if already scheduled).
+        *
+        * Output notification:
+        *   - Calls rSigs->on_backoff_scheduled(last_backoff_) immediately after computing the delay
+        *     (before posting) so observers always see the scheduled value even if post_after
+        *     invokes handlers synchronously.
+        *
+        * Semantics / constraints:
+        *   - Idempotent: returns immediately if reconnect_scheduled_ is already true.
+        *   - If tOps.post_after is not provided, the function clears reconnect_scheduled_
+        *     (no timer can be posted) so retries are not left permanently scheduled.
+        *   - Must be invoked on the same execution context / strand used by TransportOps
+        *     (or be externally synchronized) to avoid races on controller state.
+        *   - Observers are optional; check rSigs and the specific std::function before invoking.
+        *
+        * Edge cases / notes:
+        *   - If post_after executes the handler synchronously, calling the observer
+        *     before posting avoids missing the notification (some implementations of post_after
+        *     may invoke handlers synchronously(i.e. call cb() before post_after returns).
+        *   - The scheduled timer may never run (io stopped, controller destroyed, or
+        *     post_after implementation misbehaves); callers/owners should provide a
+        *     stop/cancel path that clears reconnect_scheduled_ if needed.
+        */
         void schedule_reconnect_(){
 
             if( reconnect_scheduled_ )
@@ -304,12 +391,17 @@ class ReconnectController {
 
             if( tOps.post_after )
             {
-                tOps.post_after(last_backoff_,[this](){
-                    if(reconnect_scheduled_ == false)
-                        return;
+                //the pattern is that this would not be used.
+                //
+                std::weak_ptr<ReconnectController> wk = this->weak_from_this();
+                tOps.post_after(last_backoff_,[wk](){
+                    if( auto s = wk.lock() ){
+                        if(s->reconnect_scheduled_ == false)
+                            return;
 
-                    reconnect_scheduled_ = false;
-                    try_reconnect_();
+                        s->reconnect_scheduled_ = false;
+                        s->try_reconnect_();
+                    }
                 });
             }
             else

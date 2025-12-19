@@ -8,7 +8,43 @@
 #include "transport.hpp"
 #include <mutex>
 
-//Purpose of Session class: handles OCPP message correlation, state, timers
+/*
+ * Session
+ *
+ * Purpose:
+ *   Manage OCPP message correlation, per-request timeouts, heartbeat scheduling
+ *   and minimal session state (Disconnected / Connected / Booting / Ready).
+ *
+ * Inputs (events/operations the Session expects):
+ *   - transport->on_message -> Session::on_message(std::string_view)
+ *   - transport->on_close   -> Session::on_close()
+ *   - Caller APIs: start(), start_heartbeat(), send_call(...)
+ *
+ * Outputs (what Session notifies / delivers):
+ *   - Per-request completion via the on_reply callback passed to send_call:
+ *       invoked exactly once with a CallResult or a CallError (timeout/close).
+ *   - Logs / side-effects (console output). No global observer callbacks are exposed
+ *     by Session itself — higher-level glue observes connection lifecycle via Transport.
+ *
+ * Public methods / hooks for integrators:
+ *   - start()                         : start underlying transport.
+ *   - start_heartbeat(int interval)   : begin recurring HeartBeat calls.
+ *   - send_call(Payload, on_reply, t) : send a request and register per-call resolver.
+ *   - on_message(std::string_view)    : parse raw payload and forward to on_frame (testable).
+ *   - on_frame(const OcppFrame&)      : deliver already-parsed frame (testable).
+ *   - on_close()                      : handle transport close, cancel pending and notify callers.
+ *
+ * Concurrency / execution model:
+ *   - Callers must coordinate usage on the same io_context/strand or otherwise
+ *     synchronize; Session protects the pending map with pending_mtx.
+ *   - Timers and transport callbacks run on the session's io context; callbacks
+ *     are invoked outside locks to avoid reentrancy.
+ *
+ * Notes for integrators:
+ *   - Session is focused on correlation/timeouts; higher-level protocol flows
+ *     (boot sequence, transitions to Ready, reconnect orchestration) are the
+ *     responsibility of the owning glue/controller/test harness.
+ */
 struct Session {
   enum class State { Disconnected, Connected, Booting, Ready };
   State state = State::Disconnected;
@@ -32,16 +68,67 @@ struct Session {
 
     std::unique_ptr<boost::asio::steady_timer> timer;
 
-    std::function<void()> on_heartbeat_response_;
-    void on_heartbeat_response(std::function<void()> cb){
-        on_heartbeat_response_ = std::move(cb);
-    }
-
+    /*
+    * start()
+    *
+    * Brief:
+    *   Begin the session's transport activity. This calls the underlying
+    *   Transport::start() so the socket/websocket is opened (or connect attempts
+    *   are initiated) and incoming/outgoing message handling becomes active.
+    *
+    * Trigger:
+    *   Called by higher-level code (glue, harness, or tests) when you want the
+    *   session to become active and start exchanging frames.
+    *
+    * Purpose:
+    *   - Start the transport so the previously-installed on_message/on_close
+    *     callbacks (wired in the Session constructor) can receive events.
+    *   - Put the session into a running state so send_call, heartbeats, etc.
+    *     may be used (state transition responsibilities may be handled elsewhere).
+    *
+    * Difference from related methods:
+    *   - start() only starts the transport; it does not send protocol-level
+    *     messages (use send_call/start_heartbeat) or handle incoming frames
+    *     (on_message/on_frame).
+    *
+    * Concurrency / lifecycle notes:
+    *   - Should be invoked on the session's io context or otherwise synchronized
+    *     with transport usage. It is a lightweight operation that delegates to
+    *     Transport; any higher-level state transitions should be coordinated by
+    *     the caller(the code that owns/creates the Session (glue, controller, tests, harness)
+    *     must perform those higher-level steps in the right order and on the right execution context).
+    */
+   //TODO: is this needed given ReconnectController now implements a similar actuation?
     void start(void)
     {
         transport->start();
     }
 
+    /*
+    * start_heartbeat(int interval)
+    *
+    * Brief:
+    *   Start a repeating heartbeat timer that sends a HeartBeat Call every
+    *   `interval` seconds. Each timer expiration invokes send_call(HeartBeat)
+    *   and restarts the heartbeat timer.
+    *
+    * Trigger:
+    *   Called by higher-level session code (e.g. after connection/boot completes)
+    *   or tests to begin periodic liveness checks.
+    *
+    * Purpose:
+    *   - Keep the peer informed (and detect liveness) by sending periodic HeartBeat
+    *     requests and processing their replies via the usual send_call -> on_frame path.
+    *   - Automatically reschedule itself so heartbeats continue until the timer
+    *     is cancelled or the session is closed.
+    *
+    * Concurrency / lifecycle notes:
+    *   - Timer callbacks run on the session's io context; the timer is owned by the Session
+    *     (the `timer` unique_ptr). Cancel or reset the timer (timer->cancel() or reset pointer)
+    *     to stop heartbeats (e.g. on close).
+    *   - Handler checks the ec provided to async_wait and returns on cancellation to avoid
+    *     sending extra heartbeats during shutdown.
+    */
     void start_heartbeat(int interval)
     {
         timer = std::make_unique<boost::asio::steady_timer>(io, std::chrono::seconds(interval));
@@ -68,22 +155,38 @@ struct Session {
         });
     }
 
-/**
- * send_call
- *
- * Send an OCPP Call built from the given payload and arrange to receive a reply.
- *
- * Parameters:
- *  - p: payload to be wrapped into a Call (any type serializable by json(c)).
- *  - on_reply: completion callback invoked when a reply is received or on error/timeout.
- *              The callback receives an OcppFrame which will be either CallResult
- *              (successful reply) or CallError (error, timeout, or connection closed).
- *  - timeout: optional timeout duration after which a synthetic CallError is delivered
- *             to on_reply. Defaults to 10 seconds.
- *
- * Return value:
- *  - void
- */
+  /*
+  * send_call(const Payload& p, std::function<void(const OcppFrame&)> on_reply, std::chrono::seconds timeout)
+  *
+  * Brief:
+  *   Send an OCPP Call built from `p`, register a completion callback, and arrange
+  *   a per-call timeout. The provided on_reply is invoked exactly once with either
+  *   a CallResult (successful reply) or a CallError (timeout or connection closed).
+  *
+  * Trigger:
+  *   Called by session logic (heartbeats, boot, tests, user code) when the session
+  *   needs to send a request and receive an asynchronous reply.
+  *
+  * Purpose:
+  *   - Create a new message id and wire a Call JSON string for transport.
+  *   - Store a Pending entry (resolve callback + steady_timer) in the pending map.
+  *   - Start a timer that will deliver a synthetic CallError if no reply arrives.
+  *   - Send the serialized Call over transport.
+  *
+  * Parameters:
+  *   - p: payload to be wrapped into a Call (must be serializable via json(c)).
+  *   - on_reply: completion callback invoked on reply, timeout, or connection close.
+  *   - timeout: duration after which a synthetic CallError is generated (defaults to 10s).
+  *
+  * Return:
+  *   - void. Completion is delivered asynchronously via on_reply.
+  *
+  * Concurrency & safety:
+  *   - Protects the pending map with pending_mtx; timers and transport callbacks may run
+  *     on the IO thread so access is synchronized.
+  *   - Timers cancel the pending entry under the lock, and callbacks are invoked
+  *     outside the lock to avoid reentrancy and deadlocks.
+  */
    template<typename Payload>
   void send_call(const Payload& p,
                  std::function<void(const OcppFrame&)> on_reply,
@@ -103,10 +206,7 @@ struct Session {
     // start timer
     it->second.timer->async_wait([this,id](auto ec){
       if (ec) return; // canceled = got reply
-      // synthesize timeout error and resolve
-      // it hides data race and timing bug. the serializing and displaying out
-      // makes things happen before the main and in time for it to p[rint]
-      // std::cout<<"Triggering timeout for messageId "<<id<<"\n";
+
       CallError err{4, id, "Timeout", "Request timed out", json::object()};
       std::function<void(const OcppFrame &)> cb;
       {
@@ -119,6 +219,63 @@ struct Session {
     transport->send(line);
   }
 
+  /* 
+  * on_message(std::string_view message)
+  *
+  * Brief:
+  *   Accepts a raw incoming transport payload (text frame), parses it as JSON
+  *   into an OCPP frame, and forwards the parsed frame to on_frame() for handling.
+  *
+  * Trigger:
+  *   Called by the Transport layer (via the transport->on_message callback) whenever
+  *   a new text/websocket message arrives.
+  *
+  * Purpose:
+  *   Centralize parse + validation + error reporting for incoming wire data, and
+  *   convert raw messages into the internal OcppFrame form used by the session logic.
+  *
+  * Difference from similar methods:
+  *   - on_message handles the raw string payload and JSON parsing.
+  *   - on_frame operates on an already-parsed OcppFrame and implements correlation/response logic.
+  */
+  void on_message(std::string_view message) {
+    std::string line{message};
+    std::cout << __func__ << "RX<<<" << line << "\n";
+    try{
+        json j = json::parse(line);
+        OcppFrame f = parse_frame(j);
+        on_frame(f);
+    } catch ( const std::exception &e ) {
+        std::cerr << "Failed to parse incoming message: " << e.what() << "\n";
+    }
+  }
+
+  /*
+  * on_frame(const OcppFrame& f)
+  *
+  * Brief:
+  *   Consume a parsed OCPP frame and perform session-level handling:
+  *   correlate replies with outstanding calls, cancel pending timeouts, and
+  *   invoke the stored completion callback with either CallResult or CallError.
+  *
+  * Trigger:
+  *   Called by on_message() after JSON parsing (or directly by tests/tools that
+  *   already have an OcppFrame).
+  *
+  * Purpose:
+  *   - Match incoming CallResult/CallError to the pending map by messageId.
+  *   - Cancel the associated timer and invoke the resolve callback exactly once.
+  *   - Remove the pending entry and perform any cleanup needed for that request.
+  *
+  * Difference from on_message():
+  *   - on_message: accepts raw transport payload, parses JSON and builds OcppFrame.
+  *   - on_frame: accepts an already-parsed OcppFrame and implements correlation,
+  *     timeout/cancellation logic, and delivery to request-specific callbacks.
+  *
+  * Concurrency note:
+  *   on_frame must protect access to the pending table (uses pending_mtx) because
+  *   timers and transport callbacks may run on the IO thread.
+  */
   void on_frame(const OcppFrame &f)
   {
     if (std::holds_alternative<CallResult>(f))
@@ -151,27 +308,31 @@ struct Session {
         cb(f);
     }
   }
-
-  void on_message(std::string_view message) {
-    std::string line{message};
-    std::cout << __func__ << "RX<<<" << line << "\n";
-    try{
-        json j = json::parse(line);
-        OcppFrame f = parse_frame(j);
-        on_frame(f);
-    } catch ( const std::exception &e ) {
-        std::cerr << "Failed to parse incoming message: " << e.what() << "\n";
-    }
-  }
-
-  //TODO: shouldn't there be a on_connected() here? that indicates a new client
-  //has connected and we need to create a session for it?
+  
+  /*
+  * on_close()
+  *
+  * Brief:
+  *   Handle transport-level connection closure: mark session disconnected,
+  *   cancel outstanding pending timers, and deliver a CallError for each
+  *   pending request so every send_call is resolved exactly once.
+  *
+  * Trigger:
+  *   Called by the Transport layer's on_close callback when the socket/websocket
+  *   is closed (graceful or unexpected), or by higher-level shutdown logic.
+  *
+  * Purpose:
+  *   - Prevent leaked pending requests by cancelling timers and notifying callers.
+  *   - Move callbacks out of the locked section and invoke them afterwards to
+  *     avoid reentrancy/deadlocks.
+  *
+  * Concurrency note:
+  *   Locks pending_mtx to snapshot and clear pending entries, cancels timers
+  *   under the lock, then invokes callbacks outside the lock.
+  */
   void on_close()
   {
     state = State::Disconnected;
-    // you dump everything into a vector and then clear from there.
-    // i dont want to call resolve inside the fucking lock_guard
-    // pair(id, resolve)
     std::vector<std::pair<std::string, std::function<void(const OcppFrame &)>>> to_close;
     {
       std::lock_guard<std::mutex> lock(pending_mtx);

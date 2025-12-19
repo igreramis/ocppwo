@@ -5,7 +5,7 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
 {
     client_ = std::make_shared<WsClient>(io_, host_, port_);
     ss_ = std::make_shared<Session>(io_, client_);
-    rcg_ = std::make_shared<ReconnectGlue>(client_, ss_);
+    rcg_ = ReconnectGlue::create(client_, ss_);
     wss_ = ss_;
 
     std::cout << "WebSocket client starting...\n";
@@ -30,7 +30,7 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
                 BootNotificationResponse resp = r.payload;
                 if (resp.status == "Accepted") {
 
-                    rcg_->rC.on_boot_accepted();
+                    rcg_->rC->on_boot_accepted();
                     
                     std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
                     if (auto ss = wss_.lock()) {
@@ -64,11 +64,11 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
 
 void TestClient::start(void) {
     // client_->start();
-    rcg_->rC.start(host_+port_);
+    rcg_->rC->start(host_+port_);
 }
 
 void TestClient::close(void) {
-    rcg_->rC.stop();
+    rcg_->rC->stop();
 }
 
 void TestClient::trigger_boot(){
