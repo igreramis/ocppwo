@@ -36,7 +36,7 @@ struct ClientUnderTest{
     {
         client_ = std::make_shared<WsClient>(io, host, port);
         ss_ = std::make_shared<Session>(io, client_); wss_= ss_;
-        rcg_ = ReconnectGlue::create(client_, ss_);
+        rcg_ = ReconnectGlue::create(client_, io);
 
         rcg_->rS->on_connected = [this](){
             std::cout << "ReconnectController: websocket connected" << "\n";

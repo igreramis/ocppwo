@@ -91,16 +91,6 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
                 });
             }
 
-            //tOps.post_after_close(id);
-            //tOps.pending_timers_clear()
-            //post_after timers reschedule. but, they reschedule only if in a certain
-            //strate, that could be disconnected or connecting. either ways, you should
-            //cancel the timers
-            //post_after should return a timer handler that can be placed in a vector
-            //or something and then cleared once the timer executes?
-            //or there shold be a mechanimsin place for in rcg or tops?
-            //threading is a big issue here
-
             reconnect_scheduled_ = false;
         };
 
@@ -369,21 +359,9 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
                 return;
             
             reconnect_scheduled_ = true;
-            //does it get reset if the lambda does not get called?
-            //if post_after is not assigned
-            //can the timer be cancelled?
-            //the io context stops after posting the handler and it nevers run
-            //the handler throws an exception
-            //the reconnectcontroller object is destroyed before the handler runs
-            //what the fuck is the timer handler about?
-            //how should stopping the reconect layer effect the schedule_reconnect
-            //functionality?
 
             last_backoff_ = compute_backoff_(attempt_++);
 
-            //if we don't have to be a fucking nazi about indicating before or after
-            //posting the reconnect that the reconnect has been posted, we can just
-            //post it here
             if( rSigs->on_backoff_scheduled )
             {
                 rSigs->on_backoff_scheduled(last_backoff_);
@@ -391,8 +369,6 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
 
             if( tOps.post_after )
             {
-                //the pattern is that this would not be used.
-                //
                 std::weak_ptr<ReconnectController> wk = this->weak_from_this();
                 tOps.post_after(last_backoff_,[wk](){
                     if( auto s = wk.lock() ){
@@ -408,11 +384,6 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
             {
                 reconnect_scheduled_ = false;
             }
-
-            // if( rSigs->on_backoff_scheduled )
-            // {
-            //     rSigs->on_backoff_scheduled(last_backoff_);
-            // }
         };
 };
 

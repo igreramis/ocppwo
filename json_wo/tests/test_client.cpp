@@ -5,7 +5,8 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
 {
     client_ = std::make_shared<WsClient>(io_, host_, port_);
     ss_ = std::make_shared<Session>(io_, client_);
-    rcg_ = ReconnectGlue::create(client_, ss_);
+    // rcg_ = ReconnectGlue::create(client_, ss_);
+    rcg_ = ReconnectGlue::create(client_, io_);
     wss_ = ss_;
 
     std::cout << "WebSocket client starting...\n";

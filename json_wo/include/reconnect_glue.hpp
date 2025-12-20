@@ -8,7 +8,8 @@
 #include <iostream>
 struct ReconnectGlue : public std::enable_shared_from_this<ReconnectGlue> {
     std::shared_ptr<WsClient> client_;
-    std::shared_ptr<Session> ss_;
+    // std::shared_ptr<Session> ss_;
+    boost::asio::io_context& io_;
 
     std::shared_ptr<ReconnectSignals> rS;
     struct ReconnectPolicy pol;
@@ -35,8 +36,8 @@ struct ReconnectGlue : public std::enable_shared_from_this<ReconnectGlue> {
      * @note Do not instantiate ReconnectGlue directly; its constructor is private to
      *       enforce correct lifetime management for asynchronous handlers.
      */
-    static std::shared_ptr<ReconnectGlue> create(std::shared_ptr<WsClient> c, std::shared_ptr<Session> s){
-        auto p = std::shared_ptr<ReconnectGlue>(new ReconnectGlue(std::move(c), std::move(s), PrivateTag{}));
+    static std::shared_ptr<ReconnectGlue> create(std::shared_ptr<WsClient> c, boost::asio::io_context& io){
+        auto p = std::shared_ptr<ReconnectGlue>(new ReconnectGlue(std::move(c), io, PrivateTag{}));
         p->init();
         return p;
     }
@@ -116,7 +117,8 @@ private:
                 auto s = wk.lock();
                 if(!s) return 0; 
                 uint64_t id = s->next_token.fetch_add(1, std::memory_order_relaxed);
-                auto t = std::make_shared<boost::asio::steady_timer>(s->ss_->io, delay);
+                // auto t = std::make_shared<boost::asio::steady_timer>(s->ss_->io, delay);
+                auto t = std::make_shared<boost::asio::steady_timer>(s->io_, delay);
                 //why make_shared?
                 {
                     std::lock_guard<std::mutex> lg(s->timers_mtx);
@@ -184,9 +186,9 @@ private:
      * - Asynchronous callbacks capture a weak_ptr to this instance and lock it before accessing members,
      *   preventing use-after-free if callbacks execute after ReconnectGlue destruction.
      */
-    ReconnectGlue(std::shared_ptr<WsClient> c, std::shared_ptr<Session> s, PrivateTag t) :
+    ReconnectGlue(std::shared_ptr<WsClient> c, boost::asio::io_context& io, PrivateTag t) :
         client_(std::move(c)),
-        ss_(std::move(s)),
+        io_(io),
         rS(std::make_shared<ReconnectSignals>()){}
 };
 

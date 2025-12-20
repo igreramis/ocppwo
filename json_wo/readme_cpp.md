@@ -1,0 +1,8 @@
+-std::unordered_map
+    -find(index) returns iterator
+    -.end() returns iterator to the end of the map
+    -.erase(iterator) deletes element pointed by the iterator
+    -
+-std::pair
+    -second is the second element of the pair
+-

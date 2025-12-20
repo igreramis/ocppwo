@@ -1,0 +1,106 @@
+Session
+	-takes as input io and transport layer'
+	-is driven by on_message and on_close events from the transport layer
+Client
+Server
+in creating the tests, you can access reconnect class individually. in design, it hid under the reconnect_glue class.
+	-you can instantiate instance of reconnect class and in doing so pass it a tOps and rS of your liking and design
+in the original application,it seems you create an instance of reconnect glue but then access rS and tie other layers to rS
+reconnect_glue
+	has a transport layer
+	it sets up callbacks dealing with the transport layer
+	then it creates an instance of reconnect and passes it the callbacks
+
+ReconnectSignals
+	-what is the purpose of them?
+	-if they are a way for other layers to be notified by reconnect about events that have happened, then we need to better hook them up
+
+ReconnectGlue
+	-is the class that needs to interact with all other layers
+
+Reconnect
+	-its a class that implements reconnection policies revolving around the transport layer
+	-the layers above should rely on the signals coming out of this class to determine when the client is connected or disconnected and accordingly send/receive data
+
+To test Reconnect class, we can always create dummy tOps, rS and verify the reconnect logic implementation from there.
+
+Reconnect
+	things that need to be fixed:
+		io needs to be taken out. and hence possibly session layer
+
+ReconnectGlue
+	needs to export rS further other to classes using ReconnectGlue
+
+Client
+	it needs to use ReconnectGlue to actuate connection and rely on exported rS on connection-related events and propagate these to the relevant layers
+
+lookup in draft how reconnectglue and reconnect are being used
+
+
+written statements on what does on connected, on online, on closed, on offline mean
+the variables that need to be set int ht e client class
+the layers that need to be notified about reconnect events
+
+Client has a REconnectGlue
+Client updates itself as well as propogates events reported by Reconnect module to other modules
+ReconnectGlue needs to implement callbacks that are mirrors of callbacks from ReconnectController
+ReconnectGlue needs to implement actuation methods that are mirrors of actuation methods in ReconnectController
+Lookup/document Session layer and what it does and make notes on high level picture especially focusing on events around BootNotification
+
+
+how would the design cater to if we were to bring in threading?
+
+All ocpp related messages are to be sent via the session layer
+
+the Reconnect module 
+	-needs to yes implement the reconnect policy
+	-needs to be notified on events happening in the transport layer
+	-needs to be notified of relevant events happening in other layers
+	-nneds to notify other layers of different events related to the connection
+
+fix the io passing to Reconnect. It shouldn't need access to it at all
+
+Client:
+	-has a ReconnectGlue class instance
+		-it is able to access Reconnect instance in it and thereby start the connection method in it
+		-client can have access to notifiers to know the different phases of the connection
+		-does the session hlayer need to be in reconnect or not?
+			-no, it is the client that owns the session module and starts it
+
+client disconnectness
+	-There’s an open request to support **server-initiated WebSocket pings** so clients can be dropped quickly when dead (common behind load balancers). Even if you rely on reads to fail, having an explicit liveness signal improves your disconnect detection.
+	-enable external websocket c
+
+when on_close() fires, are you cancelling in-flight timers? are you using promise and future? are you reporting ConnectionClosed?
+
+Expose `connect(url)` and `close()` futures that resolve when handshake/close completes.
+	what does this mean?
+
+* Teach your `TestServer` to: immediately close on first message, or close right after handshake, or close after X ms.
+* Expose a hook that records timestamps of: connect, close, reconnect, boot accepted, first heartbeat.
+
+* **Ping/Pong handling hook:** add a transport-level handler for server WebSocket `ping` that replies with `pong`. Even a stub today makes adding full support trivial later (you’ll see similar requests in libocpp). ([GitHub][2])
+
+* **Reconnect triggers:** add a “manual drop” test path like `EnableExternalWebsocketControl` to programmatically force disconnects in tests. ([everest.github.io][3])
+
+* **Metrics:** counters for reconnect attempts, last reconnect duration, last disconnect reason—this feeds Milestone 6. 
+
+give rcg an io instance rather than relying on session's io 
+
+
+//to do for multi-threaded design hopefully once entire application is completed
+Note (brief): strand vs multi-threaded io_context::run()
+If you run the same io_context on 2+ threads, Asio may execute different async handlers concurrently.
+A strand is a serialization tool: any handlers post()ed/dispatch()ed through the same strand won’t run at the same time, even with multiple io.run() threads.
+Use a strand for stateful modules (ReconnectController / Session) to avoid races on flags, timers, maps.
+In this codebase
+
+WsClient already uses strand_ to serialize writes (send()/do_write()).
+Read/close/connect callbacks (do_read(), on_connected_, on_closed_) may still call into higher layers; if io is multi-threaded, route those calls onto a controller/session strand in the glue layer.
+Why run io on multiple threads
+
+Higher throughput / less latency when there are multiple connections or heavy handlers (e.g., JSON parsing, logging), so one slow handler doesn’t block all others.
+Rule of thumb
+
+Single io.run() thread: simplest.
+Multi-threaded io.run(): enforce “all controller/session entrypoints run on a strand” (or add locking everywhere).
