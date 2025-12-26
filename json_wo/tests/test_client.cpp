@@ -4,7 +4,6 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
     : io_(io), host_(std::move(host)), port_(std::move(port))
 {
     client_ = std::make_shared<WsClient>(io_, host_, port_);
-    // ss_ = std::make_shared<Session>(io_, client_);
     sS_ = std::make_shared<SessionSignals>(SessionSignals{
         //on_boot_accepted
         [this](){
@@ -58,32 +57,7 @@ void TestClient::close(void) {
 }
 
 void TestClient::trigger_boot(){
-    ss_->send_call(BootNotification{"X100", "OpenAI"},
-        [this](const OcppFrame& f){
-            if( std::holds_alternative<CallResult>(f) ) {
-                auto r = std::get<CallResult>(f);
-                std::cout << "BootNotificationResponse: "<< r.payload << "\n";
-                BootNotificationResponse resp = r.payload;
-                if (resp.status == "Accepted") {
-                    std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
-                    if (auto ss = wss_.lock()) {
-                        ss->state = Session::State::Ready;
-                        // start_heartbeat(resp.interval);
-                        // ss->start_heartbeat(resp.interval);
-                    }
-                    else {
-                        std::cout << "Session already destroyed, cannot set state to Ready\n";
-                    }
-                }
-                else {
-                    std::cout << "BootNotification not accepted, status: " << resp.status << "\n";
-                }
-            }
-            else if( std::holds_alternative<CallError>(f) ) {
-                auto e = std::get<CallError>(f);
-                std::cout << "BootNotification Error: " << e.errorDescription << "\n";
-            }
-        });
+    ss_->on_transport_connected();
 }
 
 unsigned TestClient::transport_max_writes_in_flight() const {

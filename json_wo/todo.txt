@@ -37,6 +37,10 @@ Client
 		and propagate these to the relevant layers(session:once connected, it should be notified so it can start doing
 		boot notifications)
 	-tests
+	-r.w
+		Session has access to transport layer for sending packets out
+		But it needs to be notified by the application that the transport layer is connected because that happens through the reconnect module(what if we don't want to use the reconnect module?)
+
 
 the Reconnect module 
 	-needs to yes implement the reconnect policy
@@ -44,16 +48,16 @@ the Reconnect module
 	-needs to be notified of relevant events happening in other layers
 	-needs to notify other layers of different events related to the connection
 
-ws_client
-	-There’s an open request to support **server-initiated WebSocket pings** so clients can be dropped quickly
-	when dead (common behind load balancers). Even if you rely on reads to fail, having an explicit liveness signal
-	improves your disconnect detection.
-	-enable external websocket c
+	struct ReconnectSignals {
+	  std::function<void()> on_connecting;
+	  std::function<void()> on_connected;
+	  std::function<void(CloseReason)> on_closed;
+	  std::function<void()> on_online;
+	  std::function<void()> on_offline;
+	  std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;// Notifies observers when a backoff delay is computed and scheduled. Receives the delay (ms). Called after compute_backoff_ and posting the timer; handler should be quick/non‑blocking.
+	};
 
-how would the design cater to if we were to bring in threading?
 
-when on_close() fires, are you cancelling in-flight timers?
-are you using promise and future? are you reporting ConnectionClosed?
 
 Expose `connect(url)` and `close()` futures that resolve when handshake/close completes.
 	what does this mean?
@@ -67,6 +71,7 @@ Expose `connect(url)` and `close()` futures that resolve when handshake/close co
 
 * **Metrics:** counters for reconnect attempts, last reconnect duration, last disconnect reason—this feeds Milestone 6. 
 
+When Session sends BootNotification, it should deal with Pending/Cancelled states?
 
 
 //to do for multi-threaded design hopefully once entire application is completed
@@ -85,3 +90,10 @@ Rule of thumb
 
 Single io.run() thread: simplest.
 Multi-threaded io.run(): enforce “all controller/session entrypoints run on a strand” (or add locking everywhere).
+
+if( f.wait_for() != std::future_status::ready )
+{
+	return;
+}
+
+you are changing the implementation of on_connected and on_closed so that they now run on a promise.

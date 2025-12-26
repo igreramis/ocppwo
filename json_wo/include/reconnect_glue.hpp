@@ -6,6 +6,44 @@
 #include "session.hpp"
 #include "signals.hpp"
 #include <iostream>
+
+/*
+ * ReconnectGlue
+ *
+ * Purpose:
+ *   Glue layer that wires the reconnect state machine (ReconnectController) to the concrete
+ *   transport (WsClient) and exposes lifecycle/backoff signals to higher layers.
+ *
+ * What it owns:
+ *   - client_ : the underlying WebSocket client used to connect/send/close.
+ *   - rC     : a ReconnectController instance that decides when to connect/retry/stop.
+ *   - rS     : ReconnectSignals published outward (on_connecting/on_connected/on_closed/
+ *              on_offline/on_online/on_backoff_scheduled).
+ *   - Timer bookkeeping for reconnect/resume scheduling:
+ *     - next_token + timers map for cancellable post_after() operations.
+ *
+ * Inputs (public API / how external code drives it):
+ *   - create(client, io) : factory that constructs the object under shared ownership and
+ *     runs init() to safely install weak_ptr-based async callbacks.
+ *   - rC->start(url)     : external code triggers connection attempts via the controller.
+ *   - rC->stop()         : external code requests shutdown (controller initiates close).
+ *
+ * Outputs (events/signals it produces to the outside):
+ *   - rS callbacks are invoked by the controller to report connection state transitions,
+ *     offline/online transitions, and scheduled backoff delays.
+ *
+ * TransportOps it provides to ReconnectController (internal interface):
+ *   - async_connect(url, done): implemented via WsClient::on_connected/on_close + WsClient::start().
+ *   - async_close(done)       : implemented via WsClient::close() + close callback.
+ *   - post_after(delay, cb)   : implemented via boost::asio::steady_timer stored in a token->timer map.
+ *   - cancel_post(token)      : cancels a previously posted timer by token.
+ *   - now()                   : returns steady_clock::now() for metrics/tests.
+ *
+ * Lifetime / safety notes:
+ *   - Must be created via create() (not stack-constructed) because init() captures weak_from_this()
+ *     in async handlers to avoid use-after-free.
+ *   - Timer map is guarded by timers_mtx to allow cancel to race safely with timer completion.
+ */
 struct ReconnectGlue : public std::enable_shared_from_this<ReconnectGlue> {
     std::shared_ptr<WsClient> client_;
     // std::shared_ptr<Session> ss_;

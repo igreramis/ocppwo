@@ -19,7 +19,7 @@
  * Inputs (events/operations the Session expects):
  *   - transport->on_message -> Session::on_message(std::string_view)
  *   - transport->on_close   -> Session::on_close()
- *   - Caller APIs: start(), start_heartbeat(), send_call(...)
+ *   - Caller APIs: start(), start_heartbeat(), send_call(...), on_transport_connected()
  *
  * Outputs (what Session notifies / delivers):
  *   - Per-request completion via the on_reply callback passed to send_call:
@@ -34,6 +34,7 @@
  *   - on_message(std::string_view)    : parse raw payload and forward to on_frame (testable).
  *   - on_frame(const OcppFrame&)      : deliver already-parsed frame (testable).
  *   - on_close()                      : handle transport close, cancel pending and notify callers.
+ *   - on_transport_connected()        : notify Session that transport is connected. (start boot).
  *
  * Concurrency / execution model:
  *   - Callers must coordinate usage on the same io_context/strand or otherwise
@@ -362,12 +363,60 @@ struct Session {
     }
   }
 
+  //   Inbound lifecycle hook from the transport/reconnect layer indicating the underlying
+  //   WebSocket/TCP transport is now connected and ready to carry OCPP frames.
+  //
+  // Trigger:
+  //   Called by owning glue (e.g., ReconnectGlue / TestClient) when the transport reports
+  //   a successful connection (typically after WsClient handshake completes and
+  //   ReconnectController emits on_connected).
+  //
+  // Purpose:
+  //   - Transition the Session state machine into the "booting" phase.
+  //   - Initiate the OCPP boot sequence by sending BootNotification (via send_call),
+  //     so the Session can later become Ready once boot is accepted.
+  //
+  // Outputs / side effects:
+  //   - Sends a BootNotification request on the transport.
+  //   - On BootNotification accepted: may invoke session_signals->on_boot_accepted (if set)
+  //     and/or update internal state/heartbeat interval depending on implementation.
+  //
+  // Notes:
+  //   - This method is intentionally separated from Transport::on_connected so that
+  //     reconnect logic can decide when a "connected transport" should translate into
+  //     a protocol-level boot attempt.
   void on_transport_connected()
   {
     state = State::Booting;
     send_boot();
   }
 
+  //   Initiate the OCPP BootNotification flow by sending a BootNotification Call and
+  //   installing a reply handler that drives the Session into the correct post-boot state.
+  //
+  // Trigger:
+  //   Typically called from on_transport_connected() (or equivalent glue) once the
+  //   underlying transport is connected and the session is ready to begin protocol
+  //   negotiation with the CSMS.
+  //
+  // Purpose:
+  //   - Move the session into State::Booting (if not already).
+  //   - Send BootNotification using send_call(...) so the Session can correlate the
+  //     CallResult/CallError response and act on it.
+  //
+  // Outputs / side effects:
+  //   - Outbound message: BootNotification request frame written to transport.
+  //   - On accepted CallResult:
+  //     - transitions Session toward State::Ready (implementation-dependent),
+  //     - may start or configure heartbeat interval,
+  //     - may notify higher layers via session_signals->on_boot_accepted (if provided).
+  //   - On CallError / timeout / close:
+  //     - keeps or returns session to a non-ready state and relies on reconnect logic.
+  //
+  // Concurrency / lifetime notes:
+  //   - The reply callback runs on the io_context that processes inbound frames; it should
+  //     be quick and should avoid blocking. Any shared state updates should follow the
+  //     Session’s locking/strand rules.
   void send_boot()
   {
     send_call(BootNotification{"X100", "OpenAI"},

@@ -329,6 +329,49 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   unsigned transport_current_write_queue_depth() const {
     return current_write_queue_depth_.load();
   }
+
+  //for unit tests
+
+  //to use in tests:
+  // auto f = client->start_future();
+  //ASSERT_EQ(f.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  //ASSERT_TRUE(f.get());//start ok
+  std::future<bool> start_future(){
+    auto p =std::make_shared<std::promise<bool>>();
+    auto f = p->get_future();
+    auto done = std::make_shared<std::atomic<bool>>(false);
+
+    auto prev_connected_ = on_connected_;
+    auto prev_closed_ = on_closed_;
+
+    on_connected_ = [prev_connected_, p, done](){
+      if(prev_connected_) prev_connected_();
+      if(!done->exchange(true)) p->set_value(true);
+    };
+    on_closed_ = [prev_closed_, p, done](){
+      if(prev_closed_) prev_closed_();
+      if(!done->exchange(true)) p->set_value(false);
+    };
+    this->start();
+    return f;
+  }
+
+//how to use in unit tests
+//auto cf = client_->close_future();
+//ASSERT_EQ(cf.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+std::future<bool> close_future(){
+  auto p = std::make_shared<std::promise<bool>>();
+  auto f = p->get_future();
+  auto done = std::make_shared<std::atomic<bool>>(false);
+
+  auto prev_closed_ = on_closed_;
+  on_closed_ = [prev_closed_, p, done](){
+    if(prev_closed_) prev_closed_();
+    if(!done->exchange(true)) p->set_value(true);
+  };
+  this->close();
+  return f;
+}
 };
 
 #endif // WS_CLIENT_HPP

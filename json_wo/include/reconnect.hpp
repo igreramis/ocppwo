@@ -42,7 +42,52 @@ struct TransportOps {
   std::function<std::chrono::steady_clock::time_point()> now;
 };
 
-
+/*
+ * ReconnectController
+ *
+ * Purpose:
+ *   A small state machine that owns the reconnection policy and orchestrates when to:
+ *   - attempt a transport connection,
+ *   - retry with backoff after failures/closes,
+ *   - stop/close on request, and
+ *   - gate “online” readiness after the higher-level OCPP boot flow succeeds.
+ *
+ * Inputs (what the controller needs from the outside):
+ *   1) TransportOps (controller -> transport):
+ *      - async_connect(url, done) : initiate a transport connect attempt.
+ *      - async_close(done)        : request a transport close.
+ *      - post_after(delay, cb)    : schedule a callback after a delay (used for backoff + resume_delay).
+ *      - now()                    : time source (optional; telemetry/tests).
+ *
+ *   2) Inbound events from transport (transport -> controller):
+ *      - on_transport_open()              : transport is established (handshake complete).
+ *      - on_transport_close(CloseReason)  : transport closed or failed after being established.
+ *
+ *   3) Inbound events from Session / protocol layer (session -> controller):
+ *      - on_boot_accepted() : indicates the OCPP session has completed BootNotification successfully.
+ *        This is the missing “session is logically ready” signal the controller needs to decide
+ *        when the overall system is truly online.
+ *
+ * Outputs (what the controller emits to the outside):
+ *   ReconnectSignals (controller -> observers):
+ *   - on_connecting()         : a connect attempt is starting.
+ *   - on_connected()          : transport is connected (TCP/WS established).
+ *   - on_closed(reason)       : transport closed (clean/error).
+ *   - on_backoff_scheduled(ms): a retry has been scheduled with the computed backoff.
+ *   - on_offline()            : system is offline immediately after transport close.
+ *   - on_online()             : system is online after BootAccepted + optional resume_delay.
+ *
+ * Key idea (transport-connected vs system-online):
+ *   - “Connected” means the transport layer is up (you can exchange frames).
+ *   - “Online” means the higher-level Session/protocol is ready to send normal traffic:
+ *     the Session has successfully completed BootNotification and the controller has
+ *     applied resume_delay before declaring the system online.
+ *
+ * Lifetime / async safety:
+ *   - Uses enable_shared_from_this / weak_from_this in posted callbacks to avoid use-after-free
+ *     when timers fire after destruction; instances should therefore be owned by std::shared_ptr
+ *     in any scenario where timers/retries are active.
+ */
 class ReconnectController : public std::enable_shared_from_this<ReconnectController> {
     public:
         // ReconnectSignals — outbound notifications from ReconnectController
@@ -139,17 +184,8 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
         // accepted. Controller can mark the logical channel online and emit
         // rSigs->on_online.
         void on_boot_accepted(){
-            //online should be flagged on after resume_delay time units
             if( tOps.post_after)
             {
-                // tOps.post_after(rp.resume_delay, [this](){
-                //     online_ = true;
-                //     if( rSigs->on_online )
-                //     {
-                //         rSigs->on_online();
-                //     }
-                // });
-
                 std::weak_ptr<ReconnectController> wk = this->weak_from_this();
                 tOps.post_after(rp.resume_delay, [wk](){
                     if(auto s = wk.lock() )
@@ -170,13 +206,6 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
                     rSigs->on_online();
                 }
             }
-            // tOps.post_after(rp.resume_delay, [this](){
-
-            // });
-            // if(rSigs->on_online)
-            // {
-            //     rSigs->on_online();
-            // }
         };
         bool can_send() const{
             return online_ && (cS_ == ConnState::Connected);
