@@ -28,7 +28,7 @@ public:
     std::string host_;
     std::string port_;
     std::shared_ptr<WsClient> client_;
-    std::shared_ptr<Session> ss_;
+    std::shared_ptr<Session> ss_; std::shared_ptr<SessionSignals> sS_;
     std::weak_ptr<Session> wss_;
     std::shared_ptr<ReconnectGlue> rcg_;
     bool online_{false};

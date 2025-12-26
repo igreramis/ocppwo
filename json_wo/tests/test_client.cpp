@@ -4,8 +4,16 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
     : io_(io), host_(std::move(host)), port_(std::move(port))
 {
     client_ = std::make_shared<WsClient>(io_, host_, port_);
-    ss_ = std::make_shared<Session>(io_, client_);
-    // rcg_ = ReconnectGlue::create(client_, ss_);
+    // ss_ = std::make_shared<Session>(io_, client_);
+    sS_ = std::make_shared<SessionSignals>(SessionSignals{
+        //on_boot_accepted
+        [this](){
+            std::cout << "SessionSignals: BootNotification accepted\n";
+            rcg_->rC->on_boot_accepted();
+        }
+    });
+
+    ss_ = std::make_shared<Session>(io_, client_, sS_);
     rcg_ = ReconnectGlue::create(client_, io_);
     wss_ = ss_;
 
@@ -21,36 +29,13 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
         online_ = false;
     };
 
+    rcg_->rS->on_connecting = [this](){
+        std::cout << "ReconnectController: websocket connecting..." << "\n";
+    };
+
     rcg_->rS->on_connected = [this](){
         std::cout << "ReconnectController: websocket connected" << "\n";
-        ss_->send_call(BootNotification{"X100", "OpenAI"},
-        [this](const OcppFrame& f){
-            if( std::holds_alternative<CallResult>(f) ) {
-                auto r = std::get<CallResult>(f);
-                std::cout << "BootNotificationResponse: "<< r.payload << "\n";
-                BootNotificationResponse resp = r.payload;
-                if (resp.status == "Accepted") {
-
-                    rcg_->rC->on_boot_accepted();
-                    
-                    std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
-                    if (auto ss = wss_.lock()) {
-                        ss->state = Session::State::Ready;
-                        heartbeat_interval_s = resp.interval;
-                    }
-                    else {
-                        std::cerr << "Session already destroyed, cannot set state to Ready\n";
-                    }
-                } else if (resp.status == "Pending") {
-                    std::cout << "BootNotification pending, interval: " << resp.interval << "\n";
-                } else {
-                    std::cout << "BootNotification rejected\n";
-                }
-            } else if (std::holds_alternative<CallError>(f)){
-                const auto& e = std::get<CallError>(f);
-                std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
-            }
-        });
+        ss_->on_transport_connected();
     };
 
     rcg_->rS->on_online = [this](){

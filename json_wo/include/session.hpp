@@ -8,6 +8,7 @@
 #include "transport.hpp"
 #include <mutex>
 
+
 /*
  * Session
  *
@@ -45,11 +46,16 @@
  *     (boot sequence, transitions to Ready, reconnect orchestration) are the
  *     responsibility of the owning glue/controller/test harness.
  */
+struct SessionSignals {
+    std::function<void()> on_boot_accepted;
+};
+
 struct Session {
   enum class State { Disconnected, Connected, Booting, Ready };
   State state = State::Disconnected;
   boost::asio::io_context& io;
   std::shared_ptr<Transport> transport;
+  std::shared_ptr<SessionSignals> session_signals;
   std::mutex pending_mtx;
   struct Pending {
     std::unique_ptr<boost::asio::steady_timer> timer;
@@ -57,13 +63,18 @@ struct Session {
   };
   std::unordered_map<std::string, Pending> pending;
 
-  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t) : io(io_), transport(t) {
+  //method definitions
+  int heartbeat_interval_s{0};
+
+  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t, std::shared_ptr<SessionSignals> e) : io(io_), transport(t), session_signals(e) {
     transport->on_message([this](std::string_view sv){
         this->on_message(sv);
     });
     transport->on_close([this](){
         this->on_close();
     });
+    //if we are passing it transport, then it should get the connected signal or not? and if it is getting the connected signals then the applkication shoulds
+    //just waiut for the session boot notification accepted signal
   }
 
     std::unique_ptr<boost::asio::steady_timer> timer;
@@ -349,5 +360,46 @@ struct Session {
       if (v.second)
         v.second(OcppFrame{err});
     }
+  }
+
+  void on_transport_connected()
+  {
+    state = State::Booting;
+    send_boot();
+  }
+
+  void send_boot()
+  {
+    send_call(BootNotification{"X100", "OpenAI"},
+    [this](const OcppFrame &f) {
+      if (std::holds_alternative<CallResult>(f))
+      {
+        const auto &r = std::get<CallResult>(f);
+        BootNotificationResponse resp = r.payload;
+        if (resp.status == "Accepted")
+        {
+          std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
+          state = State::Ready;
+          heartbeat_interval_s = resp.interval;
+          if (session_signals && session_signals->on_boot_accepted)
+          {
+            session_signals->on_boot_accepted();
+          }
+        }
+        else if (resp.status == "Pending")
+        {
+          std::cout << "BootNotification pending, interval: " << resp.interval << "\n";
+        }
+        else
+        {
+          std::cout << "BootNotification rejected\n";
+        }
+      }
+      else if (std::holds_alternative<CallError>(f))
+      {
+        const auto &e = std::get<CallError>(f);
+        std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
+      }
+    });
   }
 };

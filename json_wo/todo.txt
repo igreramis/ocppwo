@@ -20,58 +20,40 @@ ReconnectGlue
 
 Reconnect
 	-its a class that implements reconnection policies revolving around the transport layer
-	-the layers above should rely on the signals coming out of this class to determine when the client is connected or disconnected and accordingly send/receive data
+	-the layers above should rely on the signals coming out of this class to determine when
+	the client is connected or disconnected and accordingly send/receive data
 
 To test Reconnect class, we can always create dummy tOps, rS and verify the reconnect logic implementation from there.
 
-Reconnect
-	things that need to be fixed:
-		io needs to be taken out. and hence possibly session layer
-
 ReconnectGlue
-	needs to export rS further other to classes using ReconnectGlue
+	-needs to export rS further other to classes using ReconnectGlue
+	-ReconnectGlue needs to implement callbacks that are mirrors of callbacks from ReconnectController
+	-ReconnectGlue needs to implement actuation methods that are mirrors of actuation methods in ReconnectController
 
 Client
-	it needs to use ReconnectGlue to actuate connection and rely on exported rS on connection-related events and propagate these to the relevant layers
-
-lookup in draft how reconnectglue and reconnect are being used
-
-
-written statements on what does on connected, on online, on closed, on offline mean
-the variables that need to be set int ht e client class
-the layers that need to be notified about reconnect events
-
-Client has a REconnectGlue
-Client updates itself as well as propogates events reported by Reconnect module to other modules
-ReconnectGlue needs to implement callbacks that are mirrors of callbacks from ReconnectController
-ReconnectGlue needs to implement actuation methods that are mirrors of actuation methods in ReconnectController
-Lookup/document Session layer and what it does and make notes on high level picture especially focusing on events around BootNotification
-
-
-how would the design cater to if we were to bring in threading?
-
-All ocpp related messages are to be sent via the session layer
+	-application
+		it needs to use ReconnectGlue to actuate connection(via accessing the Reconnect instance) and
+		rely on exported rS on connection-related events(what events should the client be interested in?)
+		and propagate these to the relevant layers(session:once connected, it should be notified so it can start doing
+		boot notifications)
+	-tests
 
 the Reconnect module 
 	-needs to yes implement the reconnect policy
 	-needs to be notified on events happening in the transport layer
 	-needs to be notified of relevant events happening in other layers
-	-nneds to notify other layers of different events related to the connection
+	-needs to notify other layers of different events related to the connection
 
-fix the io passing to Reconnect. It shouldn't need access to it at all
-
-Client:
-	-has a ReconnectGlue class instance
-		-it is able to access Reconnect instance in it and thereby start the connection method in it
-		-client can have access to notifiers to know the different phases of the connection
-		-does the session hlayer need to be in reconnect or not?
-			-no, it is the client that owns the session module and starts it
-
-client disconnectness
-	-There’s an open request to support **server-initiated WebSocket pings** so clients can be dropped quickly when dead (common behind load balancers). Even if you rely on reads to fail, having an explicit liveness signal improves your disconnect detection.
+ws_client
+	-There’s an open request to support **server-initiated WebSocket pings** so clients can be dropped quickly
+	when dead (common behind load balancers). Even if you rely on reads to fail, having an explicit liveness signal
+	improves your disconnect detection.
 	-enable external websocket c
 
-when on_close() fires, are you cancelling in-flight timers? are you using promise and future? are you reporting ConnectionClosed?
+how would the design cater to if we were to bring in threading?
+
+when on_close() fires, are you cancelling in-flight timers?
+are you using promise and future? are you reporting ConnectionClosed?
 
 Expose `connect(url)` and `close()` futures that resolve when handshake/close completes.
 	what does this mean?
@@ -85,7 +67,6 @@ Expose `connect(url)` and `close()` futures that resolve when handshake/close co
 
 * **Metrics:** counters for reconnect attempts, last reconnect duration, last disconnect reason—this feeds Milestone 6. 
 
-give rcg an io instance rather than relying on session's io 
 
 
 //to do for multi-threaded design hopefully once entire application is completed

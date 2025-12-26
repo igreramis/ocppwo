@@ -37,6 +37,9 @@ struct ReconnectGlue : public std::enable_shared_from_this<ReconnectGlue> {
      *       enforce correct lifetime management for asynchronous handlers.
      */
     static std::shared_ptr<ReconnectGlue> create(std::shared_ptr<WsClient> c, boost::asio::io_context& io){
+        //we are using new here instead of make_shared because, make_shared internally calls the 
+        //ReconnectGlue constructor from inside the standard library, but since the construtor is private
+        //it will fail.
         auto p = std::shared_ptr<ReconnectGlue>(new ReconnectGlue(std::move(c), io, PrivateTag{}));
         p->init();
         return p;

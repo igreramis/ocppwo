@@ -17,7 +17,7 @@ struct ClientUnderTest{
     //provide a way to start the client pointing to ws:127.0.0.1:port
     //and a way to stop it. This structd is a placeholder.
     std::shared_ptr<WsClient> client_;
-    std::shared_ptr<Session> ss_;
+    std::shared_ptr<Session> ss_; std::shared_ptr<SessionSignals> sS_;
     std::shared_ptr<ReconnectGlue> rcg_;
     std::weak_ptr<Session> wss_;
     unsigned transport_max_writes_in_flight() const {
@@ -35,40 +35,19 @@ struct ClientUnderTest{
     void start(boost::asio::io_context& io, std::string host, std::string port)
     {
         client_ = std::make_shared<WsClient>(io, host, port);
-        ss_ = std::make_shared<Session>(io, client_); wss_= ss_;
+        sS_ = std::make_shared<SessionSignals>(SessionSignals{
+            //on_boot_accepted
+            [this](){
+                std::cout << "SessionSignals: BootNotification accepted\n";
+                rcg_->rC->on_boot_accepted();
+            }
+        });
+        ss_ = std::make_shared<Session>(io, client_, sS_); wss_= ss_;
         rcg_ = ReconnectGlue::create(client_, io);
 
         rcg_->rS->on_connected = [this](){
             std::cout << "ReconnectController: websocket connected" << "\n";
-            ss_->send_call(BootNotification{"X100", "OpenAI"},
-            [this](const OcppFrame& f){
-                if( std::holds_alternative<CallResult>(f) ) {
-                    auto r = std::get<CallResult>(f);
-                    std::cout << "BootNotificationResponse: "<< r.payload << "\n";
-                    BootNotificationResponse resp = r.payload;
-                    if (resp.status == "Accepted") {
-
-                        rcg_->rC->on_boot_accepted();
-                        
-                        std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
-                        if (auto ss = wss_.lock()) {
-                            ss->state = Session::State::Ready;
-                            // start_heartbeat(resp.interval);
-                            ss->start_heartbeat(resp.interval);
-                        }
-                        else {
-                            std::cerr << "Session already destroyed, cannot set state to Ready\n";
-                        }
-                    } else if (resp.status == "Pending") {
-                        std::cout << "BootNotification pending, interval: " << resp.interval << "\n";
-                    } else {
-                        std::cout << "BootNotification rejected\n";
-                    }
-                } else if (std::holds_alternative<CallError>(f)){
-                    const auto& e = std::get<CallError>(f);
-                    std::cerr << "BootNotification Error: " << e.errorDescription << "\n";
-                }
-            });
+            ss_->on_transport_connected();
         };
 
         rcg_->rS->on_closed = [this](CloseReason cR){
