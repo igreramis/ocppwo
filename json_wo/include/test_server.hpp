@@ -25,6 +25,19 @@ class TestServer {
         bool close_after_first_message = false;
         std::chrono::milliseconds close_after_ms{-1};
     };
+    
+    enum class EventType {
+        Connect,
+        Reconnect,
+        BootAccepted,
+        FirstHeartBeat,
+        Disconnect
+    };
+    struct Event {
+        EventType type;
+        std::chrono::steady_clock::time_point ts;
+    };
+
     struct Frame {
         std::string text;
         std::chrono::steady_clock::time_point t;
@@ -41,9 +54,15 @@ class TestServer {
         std::string last_boot_msg_id() const;
         bool is_client_disconnected() const;
         void set_close_policy(ClosePolicy p);
+        void on_event(std::function<void(const Event&)> cb);
+        std::vector<Event> events() const;
     private:
         void do_read();
         void arm_close_timer_();
+        void record_event_(EventType t);
+        mutable std::mutex events_mtx_;
+        std::function<void(const Event&)> on_event_;
+
         OcppFrame TestBootNotificationHandler(const BootNotification&, const std::string& );
         tl::expected<BootNotificationResponse, std::string> TestBootNotificationHandler_v2(const BootNotification&);
         boost::asio::io_context& ioc_;
@@ -54,11 +73,14 @@ class TestServer {
         std::shared_ptr<WsServerSession> ss;
         std::vector<Frame> received_;
         std::vector<Frame> heartbeats_;
+        std::vector<Event> events_;
+
         ClosePolicy close_policy_;
         bool first_message_seen_{false};
         std::shared_ptr<boost::asio::steady_timer> close_timer_;
         mutable std::mutex mtx_;
         unsigned short port_;
+        unsigned connect_count_{0};
         bool running_ = false;
         std::string last_boot_msg_id_;
         int heartbeat_interval_ = 5;

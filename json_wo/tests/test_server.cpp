@@ -22,6 +22,8 @@ void TestServer::start(){
             if (!ec) {
                 std::cout << "New client connected from " << s.remote_endpoint() << "\n";
 
+                record_event_(connect_count_++ == 1 ? EventType::Connect : EventType::Reconnect);
+
                 //over here should be a method call for things to do once client connected.
                 received_.clear();
                 heartbeats_.clear();
@@ -54,9 +56,13 @@ void TestServer::start(){
                             Call c = std::get<Call>(f);
                             if( c.action == "HeartBeat" ) {
                                 heartbeats_.push_back(Frame{std::string(msg), now});
+                                if( heartbeats_.size() == 1 ) {
+                                    record_event_(EventType::FirstHeartBeat);
+                                }
                             }
                             else if( c.action == "BootNotification" ) {
                                 last_boot_msg_id_ = c.messageId;
+                                record_event_(EventType::BootAccepted);
                             }
                             else if( c.action == "Authorize" ) {
                                 return;
@@ -77,6 +83,7 @@ void TestServer::start(){
                     std::lock_guard<std::mutex> lock(mtx_);
                     client_disconnected = true;
                     last_boot_msg_id_.clear();
+                    record_event_(EventType::Disconnect);
                 });
 
                 ss->start();
@@ -166,6 +173,18 @@ bool TestServer::is_client_disconnected() const{
 void TestServer::set_close_policy(ClosePolicy p){
     close_policy_ = p;
 }
+//do we need to chain?
+//why the fuck are we using std::move here?
+void TestServer::on_event(std::function<void(const Event&)> cb){
+    on_event_ = std::move(cb);//why are we using std::move() here? 
+    //we create a lambda in the call to on_event and then that moves in memory
+    //otherwise, if we are passing a method, that is a different thing, then move does not have a purepose.
+}
+
+std::vector<TestServer::Event> TestServer::events() const{
+    std::lock_guard<std::mutex> lk(events_mtx_);
+    return events_;
+}
 
 void TestServer::arm_close_timer_(){
     if(close_policy_.close_after_ms.count()<0) return;
@@ -179,6 +198,17 @@ void TestServer::arm_close_timer_(){
         if(auto s = wss.lock())
             s->close();
     });
+}
+
+void TestServer::record_event_(EventType t){
+    Event e{t, std::chrono::steady_clock::now()};
+    {
+        std::lock_guard<std::mutex> lk(events_mtx_);
+        events_.push_back(e);
+    }
+    if(on_event_){
+        on_event_(e);
+    }
 }
 // int main(){
 //     boost::asio::io_context io;
