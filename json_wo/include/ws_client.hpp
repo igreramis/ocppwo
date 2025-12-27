@@ -356,22 +356,22 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     return f;
   }
 
-//how to use in unit tests
-//auto cf = client_->close_future();
-//ASSERT_EQ(cf.wait_for(std::chrono::seconds(5)), std::future_status::ready);
-std::future<bool> close_future(){
-  auto p = std::make_shared<std::promise<bool>>();
-  auto f = p->get_future();
-  auto done = std::make_shared<std::atomic<bool>>(false);
+  //how to use in unit tests
+  //auto cf = client_->close_future();
+  //ASSERT_EQ(cf.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  std::future<bool> close_future(){
+    auto p = std::make_shared<std::promise<bool>>();
+    auto f = p->get_future();
+    auto done = std::make_shared<std::atomic<bool>>(false);
 
-  auto prev_closed_ = on_closed_;
-  on_closed_ = [prev_closed_, p, done](){
-    if(prev_closed_) prev_closed_();
-    if(!done->exchange(true)) p->set_value(true);
-  };
-  this->close();
-  return f;
-}
+    auto prev_closed_ = on_closed_;
+    on_closed_ = [prev_closed_, p, done](){
+      if(prev_closed_) prev_closed_();
+      if(!done->exchange(true)) p->set_value(true);
+    };
+    this->close();
+    return f;
+  }
 };
 
 #endif // WS_CLIENT_HPP

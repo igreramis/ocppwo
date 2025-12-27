@@ -26,9 +26,23 @@ void TestServer::start(){
                 received_.clear();
                 heartbeats_.clear();
 
+                first_message_seen_ = false;
+                close_timer_.reset();
+
+                
                 ss = std::make_shared<WsServerSession>(std::move(s));
                 std::weak_ptr<WsServerSession> wss = ss;
+                if(close_policy_.close_after_handshake){
+                    ss->close();
+                    return;
+                }
                 ss->on_message([this, wss](std::string_view msg){
+                    if(close_policy_.close_after_first_message && first_message_seen_){
+                        first_message_seen_ = true;
+                        if(auto s = wss.lock())
+                            s->close();
+                        return;
+                    }
                     const auto now = std::chrono::steady_clock::now();
                     std::cout << "Rx<--- " << msg << "\n";
                     {
@@ -66,6 +80,8 @@ void TestServer::start(){
                 });
 
                 ss->start();
+
+                arm_close_timer_();
             }
             // do_accept();
         });
@@ -122,6 +138,7 @@ tl::expected<BootNotificationResponse, std::string> TestServer::TestBootNotifica
 }
 
 void TestServer::stop(){
+    if(close_timer_) close_timer_->cancel();
     ss->close();
 }
 
@@ -144,6 +161,24 @@ std::string TestServer::last_boot_msg_id() const{
 bool TestServer::is_client_disconnected() const{
     std::lock_guard<std::mutex> lock(mtx_);
     return client_disconnected;
+}
+
+void TestServer::set_close_policy(ClosePolicy p){
+    close_policy_ = p;
+}
+
+void TestServer::arm_close_timer_(){
+    if(close_policy_.close_after_ms.count()<0) return;
+    if(!ss) return;
+
+    close_timer_ = std::make_shared<boost::asio::steady_timer>(ioc_, close_policy_.close_after_ms);
+    std::weak_ptr<WsServerSession> wss = ss;
+
+    close_timer_->async_wait([wss](const boost::system::error_code& ec){
+        if(ec) return;
+        if(auto s = wss.lock())
+            s->close();
+    });
 }
 // int main(){
 //     boost::asio::io_context io;
