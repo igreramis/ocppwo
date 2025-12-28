@@ -58,10 +58,6 @@ the Reconnect module
 	};
 
 
-
-
-* **Ping/Pong handling hook:** add a transport-level handler for server WebSocket `ping` that replies with `pong`. Even a stub today makes adding full support trivial later (you’ll see similar requests in libocpp). ([GitHub][2])
-
 * **Reconnect triggers:** add a “manual drop” test path like `EnableExternalWebsocketControl` to programmatically force disconnects in tests. ([everest.github.io][3])
 
 * **Metrics:** counters for reconnect attempts, last reconnect duration, last disconnect reason—this feeds Milestone 6. 

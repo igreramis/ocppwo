@@ -342,6 +342,31 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     });
   }
 
+  // force_drop(graceful)
+  //
+  // Test hook: programmatically drop the connection.
+  // -graceful=true : perform a normal WebSocket close handshake.
+  // -graceful=false: abortively close the underlying TCP socket (simulates network drop).
+  //
+  // External API: intended for tests/diagnostics only.
+  void force_drop(bool graceful = false) {
+    auto self = shared_from_this();
+    boost::asio::post(strand_, [self, graceful] {
+      boost::system::error_code ec;
+      if (graceful) {
+        self->ws_.async_close(websocket::close_code::normal,
+          boost::asio::bind_executor(self->strand_, [](boost::system::error_code){}));
+          return;
+      }
+
+      // Abortive drop: no WS close handshake.
+      auto& sock = beast::get_lowest_layer(self->ws_);
+      sock.cancel(ec);
+      sock.shutdown(tcp::socket::shutdown_both, ec);
+      sock.close(ec);
+    });
+  }
+
   // the following methods expose lightweight runtime metrics about the client's outbound write
   // pipeline. There purpose is for diagnostics, debugging and backpressure monitoring.
   unsigned transport_max_writes_in_flight() const {
