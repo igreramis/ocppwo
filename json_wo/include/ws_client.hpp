@@ -50,6 +50,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   std::function<void(std::string_view)> on_message_;
   std::function<void()> on_connected_;
   std::function<void()> on_closed_;
+  std::function<void(std::string_view)> on_ping_; //optional diagnostics hook
   std::string host_, port_;
   std::deque<std::shared_ptr<std::string>> write_queue_;
   bool write_in_progress_ = false;
@@ -113,6 +114,13 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     on_closed_ = std::move(cb); 
   }
 
+  // on_ping(cb)
+  // - Optional hook invoked when a WS Ping control frame is received.
+  // - Single slot; later calls overwrite.  
+  void on_ping(std::function<void(std::string_view)> cb) { 
+    on_ping_ = std::move(cb);
+  }
+
   //   Begin establishing the WebSocket connection and start the read loop.
   //
   // Behavior (async chain):
@@ -162,6 +170,24 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
           state_ = WsClientState::Connected;
           std::cout << "Handshake complete!\n";
 
+          ws_.control_callback([self = this->shared_from_this()](websocket::frame_type kind, beast::string_view payload) {
+            if (kind == websocket::frame_type::ping) {
+              if (self->on_ping_) self->on_ping_(std::string_view(payload.data(), payload.size()));
+
+              //reply with pong(echo payload). use async+strand to serialize with other writes
+              // auto data = std::make_shared<std::string>(payload.data(), payload.size());
+              websocket::ping_data pd;
+              pd.assign(payload);
+              
+              boost::asio::post(self->strand_, [self, pd]{
+                self->ws_.async_pong(pd,
+                  boost::asio::bind_executor(self->strand_, [pd](boost::system::error_code){
+                    //ignore errors; close path will handle disconnects
+                  })
+                );
+              });
+            }
+          });
           ws_.text(true);
           
         //connect and boot

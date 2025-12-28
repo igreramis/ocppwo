@@ -59,11 +59,6 @@ the Reconnect module
 
 
 
-Expose `connect(url)` and `close()` futures that resolve when handshake/close completes.
-	what does this mean?
-
-* Teach your `TestServer` to: immediately close on first message, or close right after handshake, or close after X ms.
-* Expose a hook that records timestamps of: connect, close, reconnect, boot accepted, first heartbeat.
 
 * **Ping/Pong handling hook:** add a transport-level handler for server WebSocket `ping` that replies with `pong`. Even a stub today makes adding full support trivial later (you’ll see similar requests in libocpp). ([GitHub][2])
 
@@ -97,3 +92,4 @@ if( f.wait_for() != std::future_status::ready )
 }
 
 you are changing the implementation of on_connected and on_closed so that they now run on a promise.
+
