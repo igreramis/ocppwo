@@ -90,6 +90,21 @@ struct TransportOps {
  */
 class ReconnectController : public std::enable_shared_from_this<ReconnectController> {
     public:
+        struct ReconnectMetrics {
+            uint64_t reconnect_attempts_started{0};
+            uint64_t reconnect_attempts_succeeded{0};
+            uint64_t reconnect_attempts_failed{0};
+
+            // Timing
+            std::optional<std::chrono::steady_clock::time_point> last_attempt_started_at;
+            std::optional<Ms> last_reconnect_duration; // attempt start -> on_transport_open()
+
+            // Last close info
+            std::optional<CloseReason> last_disconnect_reason;
+
+        };
+
+        ReconnectMetrics metrics() const { return metrics_; }
         // ReconnectSignals — outbound notifications from ReconnectController
         // - External actors assign these std::function callbacks (observers).
         // - Controller holds a shared_ptr to allow the glue/tests to own/modify callbacks
@@ -146,6 +161,12 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
         void on_transport_open(){
             ;
             cS_ = ConnState::Connected;
+
+            metrics_.reconnect_attempts_succeeded++;
+            if( metrics_.last_attempt_started_at) {
+                auto now = (tOps.now? tOps.now() : std::chrono::steady_clock::now());
+                metrics_.last_reconnect_duration = std::chrono::duration_cast<Ms>(now - *metrics_.last_attempt_started_at);
+            }
             if(rSigs->on_connected)
             {
                 rSigs->on_connected();
@@ -158,6 +179,9 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
         // rSigs->on_closed / on_offline / on_backoff_scheduled.
         void on_transport_close(CloseReason why){
             std::cout<<"on_transport_close() being called\n";
+
+            metrics_.last_disconnect_reason = why;
+
             if( rSigs->on_closed )
             {
                 rSigs->on_closed(why);
@@ -231,6 +255,7 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
         int attempt_{0};
         bool online_{false}, reconnect_scheduled_{false};
         Ms last_backoff_;
+        ReconnectMetrics metrics_{};
 
         /*
         * try_reconnect_()
@@ -267,6 +292,9 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
             
             cS_ = ConnState::Connecting;
 
+            metrics_.reconnect_attempts_started++;
+            metrics_.last_attempt_started_at = tOps.now ? tOps.now() : std::chrono::steady_clock::now();
+
             if(rSigs->on_connecting)
             {
                 rSigs->on_connecting();
@@ -282,6 +310,7 @@ class ReconnectController : public std::enable_shared_from_this<ReconnectControl
                     else
                     {
                         cS_ = ConnState::Disconnected;
+                        metrics_.reconnect_attempts_failed++;
                         schedule_reconnect_();
                     }
                 });

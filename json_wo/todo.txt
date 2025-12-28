@@ -57,9 +57,6 @@ the Reconnect module
 	  std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;// Notifies observers when a backoff delay is computed and scheduled. Receives the delay (ms). Called after compute_backoff_ and posting the timer; handler should be quick/non‑blocking.
 	};
 
-
-* **Reconnect triggers:** add a “manual drop” test path like `EnableExternalWebsocketControl` to programmatically force disconnects in tests. ([everest.github.io][3])
-
 * **Metrics:** counters for reconnect attempts, last reconnect duration, last disconnect reason—this feeds Milestone 6. 
 
 When Session sends BootNotification, it should deal with Pending/Cancelled states?
@@ -89,3 +86,11 @@ if( f.wait_for() != std::future_status::ready )
 
 you are changing the implementation of on_connected and on_closed so that they now run on a promise.
 
+a plain time_point would need a fake default:
+	steady_clock::time_point{}
+
+would force a made-up default like CloseReason::Clean which is wrong if nothing has ever disconnected
+
+can they be normal types instead?
+	yes, if you're ok with sentinel semantics
+is the value meaningful from construction time?
