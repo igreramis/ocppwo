@@ -169,6 +169,30 @@
         }
     },
     {
+        "label": "build and run session tests",
+        "type": "shell",
+        "command": "g++",
+        "args": [
+            "-std=c++17",
+            "-I./include",
+            "${workspaceFolder}/tests/test_session.cpp",
+            "${workspaceFolder}/router.cpp",
+            "${workspaceFolder}/ocpp_model.cpp",
+            "-o",
+            "tests/test_session",
+            "-lboost_system",
+            "-lgtest",
+            "-lgtest_main",
+            "-pthread",
+            "&&",
+            "./tests/test_session"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": false
+        }
+    },
+    {
       "label": "build-and-run-integration-tests",
       "type": "shell",
       "command": "g++",

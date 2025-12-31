@@ -94,3 +94,12 @@ would force a made-up default like CloseReason::Clean which is wrong if nothing 
 can they be normal types instead?
 	yes, if you're ok with sentinel semantics
 is the value meaningful from construction time?
+
+
+#linkedin post#
+Been deepening my C++ skills by building an async WebSocket transport using Boost.Asio/Beast.
+Focused a lot on concurrency correctness: strands, handler execution context, and avoiding races in multi-threaded io_context::run().
+Worked through real reliability problems: reconnect state machines, backoff/jitter policies, and “no double send” guarantees on disconnects.
+Explored API design tradeoffs: callbacks + timers vs promise/future wrappers for connection lifecycle and in-flight requests.
+Also added practical test hooks/telemetry: forced disconnect paths, event timestamps, and reconnect metrics for diagnostics.
+#linkedin post#
