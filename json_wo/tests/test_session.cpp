@@ -75,3 +75,33 @@ TEST(Session, CanCaptureOutboundAndInjectInboundWithoutSockets){
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
 }
+
+TEST(Session, ReplyResolvesOnceAndClearsPending){
+    ;
+    boost::asio::io_context io_;
+    auto tOps_ = std::make_shared<FakeTransport>();
+    auto sS_ = std::make_shared<SessionSignals>(SessionSignals{});
+    Session s(io_, tOps_, sS_);
+    bool replied_{false};
+
+    ASSERT_EQ(s.pending.size(), 0) << "Expected no pending calls at start of test";
+    s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
+        replied_ = std::holds_alternative<CallResult>(f) || std::holds_alternative<CallError>(f);
+    });
+
+    ASSERT_EQ(tOps_->outbound.size(), 1) << "Expected one outbound message after send_call";
+
+    ASSERT_EQ(s.pending.size(), 1) << "Expected one pending call after send_call";
+
+    // verify its a Call
+    auto j = json::parse(tOps_->outbound.back());
+    auto f = parse_frame(j);
+    ASSERT_TRUE(std::holds_alternative<Call>(f)) << "Expected outbound frame to be a Call";
+
+    auto message_id = std::get<Call>(f).messageId;
+    BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
+    CallResult cr{3, message_id, resp};
+    tOps_->inject_inbound_text(json(cr).dump());
+    ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
+    ASSERT_EQ(s.pending.size(), 0) << "Expected no pending calls after reply has been processed";
+}

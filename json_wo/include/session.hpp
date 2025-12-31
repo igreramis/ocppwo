@@ -211,22 +211,24 @@ struct Session {
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
     pend.resolve = std::move(on_reply);
-    std::lock_guard<std::mutex> lock(pending_mtx);
-    auto [it, ok] = pending.emplace(id, std::move(pend));
+    {
+      std::lock_guard<std::mutex> lock(pending_mtx);
+      auto [it, ok] = pending.emplace(id, std::move(pend));
+    
 
+      // start timer
+      it->second.timer->async_wait([this,id](auto ec){
+        if (ec) return; // canceled = got reply
 
-    // start timer
-    it->second.timer->async_wait([this,id](auto ec){
-      if (ec) return; // canceled = got reply
-
-      CallError err{4, id, "Timeout", "Request timed out", json::object()};
-      std::function<void(const OcppFrame &)> cb;
-      {
-        std::lock_guard<std::mutex> lock(pending_mtx);
-        auto p = pending.find(id);
-        if (p != pending.end()) { cb = p->second.resolve; pending.erase(p); }
-      }
-      if(cb) cb(OcppFrame{err}); });
+        CallError err{4, id, "Timeout", "Request timed out", json::object()};
+        std::function<void(const OcppFrame &)> cb;
+        {
+          std::lock_guard<std::mutex> lock(pending_mtx);
+          auto p = pending.find(id);
+          if (p != pending.end()) { cb = std::move(p->second.resolve); pending.erase(p); }
+        }
+        if(cb) cb(OcppFrame{err}); });
+    }
 
     transport->send(line);
   }
@@ -293,14 +295,19 @@ struct Session {
     if (std::holds_alternative<CallResult>(f))
     {
       const auto &r = std::get<CallResult>(f);
-      std::lock_guard<std::mutex> lock(pending_mtx);
-      auto it = pending.find(r.messageId);
-      if (it != pending.end())
+      std::function<void(const OcppFrame &)> cb;
       {
-        it->second.timer->cancel();
-        it->second.resolve(f);
-        pending.erase(it);
+        std::lock_guard<std::mutex> lock(pending_mtx);
+        auto it = pending.find(r.messageId);
+        if (it != pending.end())
+        {
+          it->second.timer->cancel();
+          cb = std::move(it->second.resolve);
+          pending.erase(it);
+        }
       }
+      if (cb)
+        cb(f);
     }
     else if (std::holds_alternative<CallError>(f))
     {
