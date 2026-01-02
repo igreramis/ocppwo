@@ -305,6 +305,10 @@ struct Session {
           cb = std::move(it->second.resolve);
           pending.erase(it);
         }
+        else{
+          unmatched_replies_.fetch_add(1, std::memory_order_relaxed);
+          return;        
+        }
       }
       if (cb)
         cb(f);
@@ -321,6 +325,10 @@ struct Session {
           it->second.timer->cancel();
           cb = it->second.resolve;
           pending.erase(it);
+        }
+        else{
+          unmatched_replies_.fetch_add(1, std::memory_order_relaxed);
+          return;        
         }
       }
       if (cb)
@@ -458,4 +466,11 @@ struct Session {
       }
     });
   }
+
+  uint64_t unmatched_replies() const {
+    return unmatched_replies_.load(std::memory_order_relaxed);
+  }
+
+private:
+  std::atomic<uint64_t> unmatched_replies_{0};
 };
