@@ -224,3 +224,66 @@ TEST(Session, TimeoutResolvesPendingAndClearsIt){
 
     ASSERT_EQ(s.pending.size(), 0) << "Expected no pending calls after timeout";
 }
+
+TEST(Session, TransportCloseResolvesAllPendingAndClearsIt) {
+    boost::asio::io_context io_;
+    auto tOps_ = std::make_shared<FakeTransport>();
+    auto sS_ = std::make_shared<SessionSignals>(SessionSignals{});
+    Session s(io_, tOps_, sS_);
+
+    int resolved = 0;
+
+    s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
+        ASSERT_TRUE(std::holds_alternative<CallError>(f));
+        ASSERT_EQ(std::get<CallError>(f).errorCode, "ConnectionClosed");
+        resolved++;
+    }, std::chrono::seconds(30));
+
+    s.send_call(BootNotification{"X101", "OpenAI"}, [&](const OcppFrame& f){
+        ASSERT_TRUE(std::holds_alternative<CallError>(f));
+        ASSERT_EQ(std::get<CallError>(f).errorCode, "ConnectionClosed");
+        resolved++;
+    }, std::chrono::seconds(30));
+
+    tOps_->close();
+
+    ASSERT_EQ(resolved, 2) << "Expected both pending calls to be resolved upon transport close";
+    ASSERT_EQ(s.pending.size(), 0) << "Expected no pending calls after transport close";
+    //you just check for resolved or you check for CallError and then errorCode and
+    //then resolve
+}
+
+TEST(Session, UnmatchedRepliesAreCountedAndIgnored){
+    ;
+    boost::asio::io_context io_;
+    auto tOps_ = std::make_shared<FakeTransport>();
+    auto sS_ = std::make_shared<SessionSignals>(SessionSignals{});
+    Session s(io_, tOps_, sS_);
+    bool replied_{false};
+
+    s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
+        replied_ = std::holds_alternative<CallResult>(f) || std::holds_alternative<CallError>(f);
+    });
+
+    uint64_t unmatched = s.unmatched_replies();
+
+    //send a reply with an unmatched id
+    BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
+    CallResult cr{3, "unmatched_id", resp};
+
+    tOps_->inject_inbound_text(json(cr).dump());
+
+    ASSERT_EQ(s.unmatched_replies(), unmatched + 1) << "Expected unmatched replies count uponreceiving unmatched CallResult";
+
+
+    auto f = json::parse(tOps_->outbound.back());
+    auto right_id = std::get<Call>(parse_frame(f)).messageId;
+    CallResult crOk{3, right_id, resp};
+    tOps_->inject_inbound_text(json(crOk).dump());
+    ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
+
+    //duplicates
+    unmatched = s.unmatched_replies();
+    tOps_->inject_inbound_text(json(crOk).dump());
+    ASSERT_EQ(s.unmatched_replies(), unmatched+1) << "Expected unmatched replies count not to increase upon receiving duplicate CallResult";
+}
