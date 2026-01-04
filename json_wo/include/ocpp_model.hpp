@@ -62,19 +62,46 @@ struct CallError {
 template<typename T>
 struct OcppActionName;
 
+template<typename T>
+struct ExpectedResponse;
+
 template<>
 struct OcppActionName<BootNotification> {
     static constexpr const char* value = "BootNotification";
+};
+template<>
+struct ExpectedResponse<BootNotification> {
+    //type
+    using type = BootNotificationResponse;
+
+    //string
+    static constexpr const char* value = "BootNotificationResponse";
 };
 
 template<>
 struct OcppActionName<Authorize> {
     static constexpr const char* value = "Authorize";
 };
+template<>
+struct ExpectedResponse<Authorize> {
+    //type
+    using type = AuthorizeResponse;
+
+    //string
+    static constexpr const char* value = "AuthorizeResponse";
+};
 
 template<>
 struct OcppActionName<HeartBeat> {
     static constexpr const char* value = "HeartBeat";
+};
+template<>
+struct ExpectedResponse<HeartBeat> {
+    //type
+    using type = HeartBeatResponse;
+
+    //string
+    static constexpr const char* value = "HeartBeatResponse";
 };
 
 template<>

@@ -61,6 +61,8 @@ struct Session {
   struct Pending {
     std::unique_ptr<boost::asio::steady_timer> timer;
     std::function<void(const OcppFrame&)> resolve;//callback to resolve the pending call
+    std::string expected_tag;
+    std::function<bool(const json& payload, std::string& err)> validate_payload;
   };
   std::unordered_map<std::string, Pending> pending;
 
@@ -211,6 +213,18 @@ struct Session {
     Pending pend;
     pend.timer = std::make_unique<boost::asio::steady_timer>(io, timeout);
     pend.resolve = std::move(on_reply);
+    using Resp = typename ExpectedResponse<Payload>::type;
+    pend.expected_tag = ExpectedResponse<Payload>::value;
+    pend.validate_payload = [](const json& payload, std::string& err) -> bool {
+      try {
+        payload.get<Resp>();
+        return true;
+      } catch (const std::exception &e) {
+        err = e.what();
+        return false;
+      }
+
+    };
     {
       std::lock_guard<std::mutex> lock(pending_mtx);
       auto [it, ok] = pending.emplace(id, std::move(pend));
@@ -296,6 +310,8 @@ struct Session {
     {
       const auto &r = std::get<CallResult>(f);
       std::function<void(const OcppFrame &)> cb;
+      std::function<bool(const json& payload, std::string& err)> validate_;
+      std::string expected_tag;
       {
         std::lock_guard<std::mutex> lock(pending_mtx);
         auto it = pending.find(r.messageId);
@@ -303,6 +319,8 @@ struct Session {
         {
           it->second.timer->cancel();
           cb = std::move(it->second.resolve);
+          validate_ = std::move(it->second.validate_payload);
+          expected_tag = std::move(it->second.expected_tag);
           pending.erase(it);
         }
         else{
@@ -310,8 +328,22 @@ struct Session {
           return;        
         }
       }
-      if (cb)
-        cb(f);
+
+      if (!cb)
+        return;
+      
+      //validate payload
+      if(validate_){
+        std::string err;
+        if(!validate_(r.payload, err)){
+          //invalid payload, generate CallError
+          CallError cerr{4, r.messageId, "ProtocolError", "Reply payload unexpected type", json::object({{"expected", expected_tag}, {"detail", err}})};
+          cb(OcppFrame{cerr});
+          return;
+        }
+      }
+      cb(f);
+      return;
     }
     else if (std::holds_alternative<CallError>(f))
     {
@@ -472,5 +504,8 @@ struct Session {
   }
 
 private:
+// why is this atomic? because, callbacks/methods in Session.hpp could run on multiple
+//different threads in parallel. this happens when a given io_context is run on xX
+//threads for increasing throughput for apps
   std::atomic<uint64_t> unmatched_replies_{0};
 };

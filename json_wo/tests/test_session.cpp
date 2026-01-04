@@ -287,3 +287,32 @@ TEST(Session, UnmatchedRepliesAreCountedAndIgnored){
     tOps_->inject_inbound_text(json(crOk).dump());
     ASSERT_EQ(s.unmatched_replies(), unmatched+1) << "Expected unmatched replies count not to increase upon receiving duplicate CallResult";
 }
+
+TEST(Session, MismatchedReplyPayloadResolvesProtocolError){
+    ;
+    boost::asio::io_context io_;
+    auto tOps_ = std::make_shared<FakeTransport>();
+    auto sS_ = std::make_shared<SessionSignals>();
+    Session s(io_, tOps_, sS_);
+    bool replied_{false};
+    OcppFrame got;
+
+    s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
+        replied_ = std::holds_alternative<CallResult>(f) || std::holds_alternative<CallError>(f);
+        got = f;
+    });
+
+    ASSERT_EQ(tOps_->outbound.size(), 1) << "Expected one outbound message after send_call";
+
+    auto j = json::parse(tOps_->outbound.back());
+    auto f = parse_frame(j);
+    ASSERT_TRUE(std::holds_alternative<Call>(f)) << "Expected outbound frame to be a Call";
+    auto message_id = std::get<Call>(f).messageId;
+
+    //i want to make a CallResult with wrong payload type.
+    CallResult cr{3, message_id, json::object({{"unexpected_field", 123}})};
+    tOps_->inject_inbound_text(json(cr).dump());
+    ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
+    ASSERT_TRUE(std::holds_alternative<CallError>(got)) << "Expected CallError";
+    ASSERT_EQ(std::get<CallError>(got).errorCode, "ProtocolError") << "Expected ProtocolError due to payload mismatch";
+}
