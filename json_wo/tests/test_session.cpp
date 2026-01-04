@@ -316,3 +316,32 @@ TEST(Session, MismatchedReplyPayloadResolvesProtocolError){
     ASSERT_TRUE(std::holds_alternative<CallError>(got)) << "Expected CallError";
     ASSERT_EQ(std::get<CallError>(got).errorCode, "ProtocolError") << "Expected ProtocolError due to payload mismatch";
 }
+
+TEST(Session, TimeoutIsCancelledOnCallResult) {
+    boost::asio::io_context io_;
+    auto tOps_ = std::make_shared<FakeTransport>();
+    auto sS_ = std::make_shared<SessionSignals>();
+    Session s(io_, tOps_, sS_);
+    uint32_t resolved = 0;
+
+    s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
+
+        resolved++;
+
+    }, std::chrono::seconds(1));
+
+    ASSERT_EQ(tOps_->outbound.size(), 1) << "Expected one outbound message after send_call";
+
+    auto j = json::parse(tOps_->outbound.back());
+    auto f = parse_frame(j);
+    ASSERT_TRUE(std::holds_alternative<Call>(f)) << "Expected outbound frame to be a Call";
+    auto message_id = std::get<Call>(f).messageId;
+
+    BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
+    CallResult cr{3, message_id, resp};
+    tOps_->inject_inbound_text(json(cr).dump());
+    ASSERT_EQ(resolved, 1) << "Expected only one resolution of the pending call (no timeout after CallResult)";
+    //wait for 2 seconds to see if timeout happens
+    io_.run_for(std::chrono::seconds(2));
+    ASSERT_EQ(resolved, 1) << "Expected only one resolution of the pending call (no timeout after CallResult)";
+}
