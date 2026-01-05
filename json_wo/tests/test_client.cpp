@@ -82,3 +82,11 @@ void TestClient::enable_heartbeats(bool enable) {
         ss_->start_heartbeat(0);
     }
 }
+
+void TestClient::send_boot(std::function<void(const OcppFrame&)> cb) {
+    ss_->send_call(BootNotification{"ModelA", "VendorA"}, std::move(cb));
+}
+
+void TestClient::send_authorize(std::function<void(const OcppFrame&)> cb) {
+    ss_->send_call(Authorize{"ABC123"}, std::move(cb));
+}

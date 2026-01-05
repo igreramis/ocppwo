@@ -73,7 +73,31 @@ void TestServer::start(){
                         }
                     }
                     router_.handle_incoming(msg, [this](std::string&& reply){
-                        ss->send(reply);
+                        bool manual = false;
+                        {
+                            std::lock_guard<std::mutex> lk(replies_mtx_);
+                            manual = manual_replies_;
+                        }
+                        if(!manual)
+                        {
+                            ss->send(reply);
+                            return;
+                        }
+                        try {
+                            //store the reply for later sending
+                            std::string s = received_.back().text;
+                            json j = json::parse(s);
+                            OcppFrame f = parse_frame(j);
+                            if(std::holds_alternative<Call>(f)){
+                                auto messageId = std::get<Call>(f).messageId;
+                                std::lock_guard<std::mutex> lk(replies_mtx_);
+                                received_call_ids_.push_back(messageId);
+                                stored_replies_.push_back(StoredReply{messageId, std::move(reply)});
+                            }
+                        } catch(...) {
+                            ;
+                        }
+
                     });
                 });
 
@@ -184,6 +208,38 @@ void TestServer::on_event(std::function<void(const Event&)> cb){
 std::vector<TestServer::Event> TestServer::events() const{
     std::lock_guard<std::mutex> lk(events_mtx_);
     return events_;
+}
+
+void TestServer::enable_manual_replies(bool enable){
+    std::lock_guard<std::mutex> lk(replies_mtx_);
+    manual_replies_ = enable;
+    //clear the relevant vecotrs.
+    received_call_ids_.clear();
+    stored_replies_.clear();
+}
+
+std::vector<std::string> TestServer::received_call_message_ids() const {
+    std::lock_guard<std::mutex> lk(replies_mtx_);
+    return received_call_ids_;
+}
+
+bool TestServer::send_stored_reply_for(const std::string& message_id) {
+    std::shared_ptr<WsServerSession> s = ss;
+    if (!s) return false;
+
+    std::string reply_text;
+    StoredReply r;
+    {
+        std::lock_guard<std::mutex> lk(replies_mtx_);
+        auto it = std::find_if(stored_replies_.begin(), stored_replies_.end(), [message_id](StoredReply &r) {
+            return r.message_id == message_id;
+        });
+        if(it == stored_replies_.end()) return false;
+        r = std::move(*it);
+        stored_replies_.erase(it);
+    }
+    s->send(r.reply_text);
+    return true;
 }
 
 void TestServer::arm_close_timer_(){

@@ -22,6 +22,8 @@ public:
     bool is_online() const;
     void enable_heartbeats(bool enable);
     bool get_backoff_time(int64_t& time_ms);
+    void send_boot(std::function<void(const OcppFrame&)> cb);
+    void send_authorize(std::function<void(const OcppFrame&)> cb);
     // std::function<void(int time_ms)> rescheduled_with_backoff;
 // private:
     boost::asio::io_context& io_;

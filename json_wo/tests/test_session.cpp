@@ -345,3 +345,49 @@ TEST(Session, TimeoutIsCancelledOnCallResult) {
     io_.run_for(std::chrono::seconds(2));
     ASSERT_EQ(resolved, 1) << "Expected only one resolution of the pending call (no timeout after CallResult)";
 }
+
+TEST(Session, TwoOutstandingCallsResolveToCorrectRequest_OutOfOrderReplies) {
+    boost::asio::io_context io_;
+    TestHarness tH_(io_, "127.0.0.1", 23456);
+    tH_.server_.set_boot_conf("boot_msg_id", 2);tH_.server_start();tH_.server_manual_replies(true);
+    tH_.client_start();
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
+    std::string boot_id;
+    while( std::chrono::steady_clock::now() < deadline ) {
+        // std::this_thread::sleep_for(100ms);
+        io_.poll();
+        boot_id = tH_.server_.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+
+    std::promise<std::string> pA; auto fA = pA.get_future();
+    std::promise<std::string>pB; auto fB = pB.get_future();
+    tH_.client_.send_boot([&pA](const OcppFrame& f){
+        ASSERT_TRUE(std::holds_alternative<CallResult>(f)) << "Expected BootNotification CallResult";
+        pA.set_value("A");
+    });
+
+    tH_.client_.send_authorize([&pB](const OcppFrame& f){
+        ASSERT_TRUE(std::holds_alternative<CallResult>(f)) << "Expected Authorize CallResult";
+        pB.set_value("B");
+    });
+
+    while(tH_.server_received_call_ids().size() < 2 && std::chrono::steady_clock::now() < deadline) {
+        io_.poll();
+    }
+    auto ids = tH_.server_received_call_ids();
+    ASSERT_EQ(ids.size(), 2) << "Expected server to have received two Calls";
+
+    std::string idA = ids[0], idB = ids[1];
+
+    ASSERT_TRUE(tH_.server_send_reply_for(idB));
+    ASSERT_TRUE(tH_.server_send_reply_for(idA));
+
+    io_.run_for(std::chrono::milliseconds(200));
+
+    ASSERT_EQ(fB.get(), "B");
+    ASSERT_EQ(fA.get(), "A");
+}

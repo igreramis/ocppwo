@@ -59,6 +59,18 @@ TestHarness::TestHarness(boost::asio::io_context& io, std::string host, unsigned
         // server_.accept_boot();
         ;
     };
+
+    server_manual_replies = [&](bool enable){
+        server_.enable_manual_replies(enable);
+    };
+
+    server_received_call_ids = [&](){
+        return server_.received_call_message_ids();
+    };
+
+    server_send_reply_for = [&](const std::string& id){
+        return server_.send_stored_reply_for(id);
+    };
 }
 
 bool TestHarness::is_client_online() const {

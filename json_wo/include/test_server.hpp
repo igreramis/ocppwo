@@ -56,11 +56,25 @@ class TestServer {
         void set_close_policy(ClosePolicy p);
         void on_event(std::function<void(const Event&)> cb);
         std::vector<Event> events() const;
-    private:
+        void enable_manual_replies(bool enable);
+        std::vector<std::string> received_call_message_ids() const;
+        bool send_stored_reply_for(const std::string& message_id);
+        private:
+        struct StoredReply {
+            std::string message_id;
+            std::string reply_text;
+        };       
+        bool manual_replies_{false};
+        mutable std::mutex replies_mtx_;
+        std::vector<std::string> received_call_ids_;
+        std::vector<StoredReply> stored_replies_;
+        //
         void do_read();
         void arm_close_timer_();
         void record_event_(EventType t);
-        mutable std::mutex events_mtx_;
+        mutable std::mutex events_mtx_;//io_context passed into this class and later on WsServerSession could be run on two
+        //different threads. one thing that would happen from this is that on_message could run in parallel at the same time
+        //thereby populating vectors in parallel. hence they need to be protected by a mutex.
         std::function<void(const Event&)> on_event_;
 
         OcppFrame TestBootNotificationHandler(const BootNotification&, const std::string& );

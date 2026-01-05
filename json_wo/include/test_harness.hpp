@@ -33,6 +33,9 @@ struct TestHarness {
   std::function<void()> client_enable_heartbeats;
   std::function<void()> trigger_boot      = []{}; // cause Session to send BootNotification
   std::function<void()> accept_boot       = []{}; // simulate CSMS sending BootAccepted
+  std::function<void(bool)> server_manual_replies = [](bool){};
+  std::function<std::vector<std::string>()> server_received_call_ids = []{ return std::vector<std::string>{}; };
+  std::function<bool(const std::string&)> server_send_reply_for = [](const std::string&){ return false; };
   bool is_client_online() const;
 // private:
   TestClient client_;
