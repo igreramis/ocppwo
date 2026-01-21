@@ -221,7 +221,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
     auto self = shared_from_this();
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
         state_ = WsServerSessionState::Disconnected;
-        std::cout << "Server WebSocket closed\n";
+        std::cout << "WS Server Session: Server WebSocket closed\n";
         if( on_closed_ ) on_closed_();
     });
   }

@@ -543,3 +543,418 @@ glue.rc = ReconnectController(
 glue.rc.start("ws://localhost:8080");
 
 io.run();
+
+
+// ClientLoop
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+
+namespace boost::asio { class io_context; }
+
+struct WsClient;
+class Session;
+
+class ClientLoop {
+public:
+    enum class State : std::uint8_t { Offline, Connecting, Online };
+
+    struct Config {
+        std::string host = "127.0.0.1";
+        unsigned short port = 0;
+        std::string url; // optional; if empty, a ws://host:port style URL can be built by caller
+    };
+
+    struct Factories {
+        // Must create a NEW transport per attempt (prevents handler duplication across reconnects).
+        std::function<std::shared_ptr<WsClient>(boost::asio::io_context&, const Config&)> make_transport;
+
+        // Optional for Exercise 1: can return nullptr; later exercises will create a real Session here.
+        std::function<std::unique_ptr<Session>(boost::asio::io_context&, WsClient&)> make_session;
+    };
+
+    ClientLoop(boost::asio::io_context& ioc, Config cfg, Factories f);
+    ~ClientLoop();
+
+    ClientLoop(const ClientLoop&) = delete;
+    ClientLoop& operator=(const ClientLoop&) = delete;
+
+    void start();
+    void stop();
+
+    // Probes for tests
+    State state() const;
+    std::uint64_t connect_attempts() const;
+    std::uint64_t online_transitions() const;
+
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+};
+
+#include "client_loop.hpp"
+
+#include "reconnect.hpp"
+#include "ws_client.hpp"
+
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
+#include <utility>
+
+struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
+    boost::asio::io_context& ioc;
+    Config cfg;
+    Factories f;
+
+    // Owned lifecycle pieces
+    std::shared_ptr<ReconnectSignals> sigs = std::make_shared<ReconnectSignals>();
+    std::shared_ptr<ReconnectController> rc;          // shared_ptr: controller uses weak_from_this()
+    std::shared_ptr<WsClient> transport;              // recreated per attempt
+    std::unique_ptr<Session> session;                 // recreated per successful connect (Exercise 2+)
+
+    // Probe state
+    std::atomic<State> st{State::Offline};
+    std::atomic<std::uint64_t> attempts{0};
+    std::atomic<std::uint64_t> online_edges{0};
+
+    // Timer plumbing for TransportOps::post_after/cancel_after
+    std::atomic<std::uint64_t> next_token{1};
+    std::mutex timers_mtx;
+    std::unordered_map<std::uint64_t, std::shared_ptr<boost::asio::steady_timer>> timers;
+
+    // Close completion hook for TransportOps::async_close
+    std::mutex close_mtx;
+    std::function<void()> pending_close_done;
+
+    explicit Impl(boost::asio::io_context& io, Config c, Factories factories)
+        : ioc(io), cfg(std::move(c)), f(std::move(factories)) {}
+
+    void set_state(State s) { st.store(s, std::memory_order_relaxed); }
+
+    void reset_connection_objects() {
+        session.reset();
+        transport.reset();
+    }
+
+    TransportOps make_transport_ops() {
+        std::weak_ptr<Impl> wk = weak_from_this();
+
+        TransportOps ops;
+
+        ops.async_connect = [wk](const std::string& /*url*/, std::function<void(bool ok)> done) {
+            auto self = wk.lock();
+            if (!self) { done(false); return; }
+
+            self->reset_connection_objects();
+            self->transport = self->f.make_transport(self->ioc, self->cfg);
+
+            if (!self->transport) { done(false); return; }
+
+            // Ensure completion is delivered exactly once.
+            struct Attempt {
+                std::atomic<bool> completed{false};
+                std::atomic<bool> connected{false};
+                std::function<void(bool)> done;
+            };
+            auto a = std::make_shared<Attempt>();
+            a->done = std::move(done);
+
+            // Single owner of callbacks: ClientLoop installs them on the fresh WsClient instance.
+            self->transport->on_connected([wk, a]() {
+                if (a->completed.exchange(true)) return;
+                a->connected.store(true);
+                if (auto self = wk.lock()) {
+                    // Create per-connection session (can be nullptr for Exercise 1)
+                    if (self->f.make_session) {
+                        self->session = self->f.make_session(self->ioc, *self->transport);
+                    }
+                }
+                a->done(true);
+            });
+
+            self->transport->on_close([wk, a]() {
+                // If connect hasn't completed yet, treat as connect failure.
+                if (!a->completed.exchange(true)) {
+                    a->done(false);
+                    return;
+                }
+
+                // If we were connected before, this is a real close event: tell controller.
+                if (a->connected.load()) {
+                    if (auto self = wk.lock()) {
+                        if (self->rc) self->rc->on_transport_close(CloseReason::TransportError);
+
+                        // Also satisfy async_close completion if one is pending.
+                        std::function<void()> close_done;
+                        {
+                            std::lock_guard<std::mutex> lg(self->close_mtx);
+                            close_done = std::move(self->pending_close_done);
+                        }
+                        if (close_done) close_done();
+                    }
+                }
+            });
+
+            // NOTE: Exercise 1 keeps on_message wiring thin; later exercises should forward to Session.
+            // self->transport->on_message([wk](std::string_view msg){ ... });
+
+            self->transport->start();
+        };
+
+        ops.async_close = [wk](std::function<void()> done) {
+            auto self = wk.lock();
+            if (!self) return;
+
+            {
+                std::lock_guard<std::mutex> lg(self->close_mtx);
+                self->pending_close_done = std::move(done);
+            }
+
+            if (self->transport) self->transport->close();
+            else {
+                // Nothing to close; complete immediately.
+                std::function<void()> cb;
+                {
+                    std::lock_guard<std::mutex> lg(self->close_mtx);
+                    cb = std::move(self->pending_close_done);
+                }
+                if (cb) cb();
+            }
+        };
+
+        ops.post_after = [wk](std::chrono::milliseconds delay, std::function<void()> cb) -> std::uint64_t {
+            auto self = wk.lock();
+            if (!self) return 0;
+
+            const std::uint64_t id = self->next_token.fetch_add(1, std::memory_order_relaxed);
+            auto t = std::make_shared<boost::asio::steady_timer>(self->ioc, delay);
+
+            {
+                std::lock_guard<std::mutex> lg(self->timers_mtx);
+                self->timers.emplace(id, t);
+            }
+
+            t->async_wait([wk, id, cb = std::move(cb)](const boost::system::error_code& ec) mutable {
+                auto self = wk.lock();
+                if (!self) return;
+
+                {
+                    std::lock_guard<std::mutex> lg(self->timers_mtx);
+                    self->timers.erase(id);
+                }
+
+                if (ec == boost::system::errc::success) cb();
+            });
+
+            return id;
+        };
+
+        ops.cancel_after = [wk](std::uint64_t id) -> bool {
+            auto self = wk.lock();
+            if (!self) return false;
+
+            std::shared_ptr<boost::asio::steady_timer> t;
+            {
+                std::lock_guard<std::mutex> lg(self->timers_mtx);
+                auto it = self->timers.find(id);
+                if (it == self->timers.end()) return false;
+                t = it->second;
+                self->timers.erase(it);
+            }
+            t->cancel();
+            return true;
+        };
+
+        ops.now = [] { return std::chrono::steady_clock::now(); };
+
+        return ops;
+    }
+
+    void wire_signals() {
+        std::weak_ptr<Impl> wk = weak_from_this();
+
+        sigs->on_connecting = [wk] {
+            if (auto self = wk.lock()) {
+                self->attempts.fetch_add(1, std::memory_order_relaxed);
+                self->set_state(State::Connecting);
+            }
+        };
+
+        // Transport connected but not yet "Online" (boot accepted gating lives in controller)
+        sigs->on_connected = [wk] {
+            if (auto self = wk.lock()) self->set_state(State::Connecting);
+        };
+
+        sigs->on_offline = [wk] {
+            if (auto self = wk.lock()) {
+                self->reset_connection_objects();
+                self->set_state(State::Offline);
+            }
+        };
+
+        sigs->on_online = [wk] {
+            if (auto self = wk.lock()) {
+                self->online_edges.fetch_add(1, std::memory_order_relaxed);
+                self->set_state(State::Online);
+            }
+        };
+
+        // Optional: on_closed/on_backoff_scheduled can be used by later tests.
+    }
+
+    void start_controller() {
+        wire_signals();
+
+        ReconnectPolicy pol;
+        auto ops = make_transport_ops();
+        rc = std::make_shared<ReconnectController>(pol, std::move(ops), sigs);
+
+        // Start in Offline; controller will move us to Connecting via on_connecting.
+        set_state(State::Offline);
+
+        const std::string url = !cfg.url.empty() ? cfg.url : "ws://" + cfg.host + ":" + std::to_string(cfg.port);
+        rc->start(url);
+    }
+
+    void stop_controller() {
+        // Cancel timers first to avoid callbacks after destruction.
+        {
+            std::lock_guard<std::mutex> lg(timers_mtx);
+            for (auto& [_, t] : timers) t->cancel();
+            timers.clear();
+        }
+
+        if (rc) rc->stop();
+        reset_connection_objects();
+        set_state(State::Offline);
+    }
+};
+
+ClientLoop::ClientLoop(boost::asio::io_context& ioc, Config cfg, Factories f)
+    : impl_(std::make_shared<Impl>(ioc, std::move(cfg), std::move(f))) {}
+
+ClientLoop::~ClientLoop() {
+    if (impl_) impl_->stop_controller();
+}
+
+void ClientLoop::start() { impl_->start_controller(); }
+void ClientLoop::stop() { impl_->stop_controller(); }
+
+ClientLoop::State ClientLoop::state() const { return impl_->st.load(std::memory_order_relaxed); }
+std::uint64_t ClientLoop::connect_attempts() const { return impl_->attempts.load(std::memory_order_relaxed); }
+std::uint64_t ClientLoop::online_transitions() const { return impl_->online_edges.load(std::memory_order_relaxed); }
+
+// ...existing code...
+void on_transport_close(CloseReason why){
+    std::cout<<"on_transport_close() being called\n";
+
+    metrics_.last_disconnect_reason = why;
+
+    online_ = false; // <-- ADD: we are not logically online after any disconnect
+
+    if( rSigs->on_closed )
+    {
+        rSigs->on_closed(why);
+    }
+
+    if( rSigs->on_offline )
+    {
+        rSigs->on_offline();
+    }
+
+    if( cS_ == ConnState::Closing )
+    {
+        cS_ = ConnState::Disconnected;
+        return;
+    }
+
+    cS_ = ConnState::Disconnected;
+
+    schedule_reconnect_();
+};
+// ...existing code...
+void try_reconnect_(){
+    if( cS_ != ConnState::Disconnected )
+        return;
+
+    online_ = false; // <-- ADD: each attempt starts "not online" until boot accepted
+
+    std::cout<<"Reconnect starting..."<<"\n";
+    // ...existing code...
+}
+// ...existing code...
+
+// ...existing code...
+void start() override {
+  auto self = shared_from_this();
+  res_.async_resolve(host_, port_, [this,self](auto ec, auto results){
+    if (ec) {
+      std::cerr << "WebSocket resolve error: " << ec.message() << "\n";
+      state_ = WsClientState::Disconnected;
+      if (on_closed_) on_closed_(); // <-- ADD
+      return;
+    }
+
+    std::cout << "Resolved.\n";
+
+    boost::asio::async_connect(ws_.next_layer(), results, [this,self](auto ec, auto){
+      if (ec) {
+        std::cerr << "WebSocket connect error: " << ec.message() << "\n";
+        state_ = WsClientState::Disconnected;
+        if (on_closed_) on_closed_(); // <-- ADD
+        return;
+      }
+
+      std::cout<<"Connected.\n";
+      state_  = WsClientState::Connecting;
+
+      ws_.async_handshake(host_, "/", [this,self](auto ec){
+        if (ec) {
+          std::cerr << "WebSocket handshake error: " << ec.message() << "\n";
+          state_ = WsClientState::Disconnected;
+          if (on_closed_) on_closed_(); // <-- ADD
+          return;
+        }
+
+        state_ = WsClientState::Connected;
+        // ...existing code...
+      });
+    });
+  });
+}
+// ...existing code...
+
+#include <gtest/gtest.h>
+#include <boost/asio/io_context.hpp>
+
+#include "client_loop.hpp"
+#include "ws_client.hpp"
+
+TEST(ClientLoop, StartsOffline) {
+    boost::asio::io_context ioc;
+
+    ClientLoop::Config cfg;
+    cfg.host = "127.0.0.1";
+    cfg.port = 0; // not used for this test
+
+    ClientLoop::Factories f;
+    f.make_transport = [](boost::asio::io_context& io, const ClientLoop::Config& c) {
+        return std::make_shared<WsClient>(io, c.host, std::to_string(c.port));
+    };
+    f.make_session = nullptr; // Exercise 1: keep thin
+
+    ClientLoop loop(ioc, cfg, std::move(f));
+
+    EXPECT_EQ(loop.state(), ClientLoop::State::Offline);
+    EXPECT_EQ(loop.connect_attempts(), 0u);
+    EXPECT_EQ(loop.online_transitions(), 0u);
+}

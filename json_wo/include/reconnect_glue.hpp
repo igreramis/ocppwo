@@ -111,7 +111,7 @@ private:
                 if( auto s = wk.lock() )
                 {
                     s->client_->on_connected([cb](){
-                        std::cout<<"tOps: async_open->connected\n";
+                        std::cout<<"reconnect glue: async_open->connected\n";
                         cb(true);
                     });
                     //if transpot signals on_close when client is trying to open it, what
@@ -121,11 +121,11 @@ private:
                     auto prev = s->client_->on_closed_;
                     std::shared_ptr<bool> completed = std::make_shared<bool>(false);
                     s->client_->on_close([cb, prev, completed](){
-                        std::cout<<"tOps: async_open->close entered\n";
+                        std::cout<<"reconnect glue: async_open->close entered\n";
                         if(prev) prev();
                         if(*completed) return;
                         cb(false);
-                        std::cout<<"tOps: async_open->close finished\n";
+                        std::cout<<"reconnect glue: async_open->close finished\n";
                     });
 
                     s->client_->start();

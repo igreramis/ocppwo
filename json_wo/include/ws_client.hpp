@@ -150,7 +150,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         return;
       }
 
-      std::cout << "Resolved.\n";
+      std::cout << "Ws Client: Resolved.\n";
 
       boost::asio::async_connect(ws_.next_layer(), results, [this,self](auto ec, auto){
         if (ec) {
@@ -158,7 +158,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
           return;
         }
 
-        std::cout<<"Connected.\n";
+        std::cout<<"Ws Client: Connected.\n";
         state_  = WsClientState::Connecting;
 
         ws_.async_handshake(host_, "/", [this,self](auto ec){
@@ -168,7 +168,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
           }
 
           state_ = WsClientState::Connected;
-          std::cout << "Handshake complete!\n";
+          std::cout << "Ws Client: Handshake complete!\n";
 
           ws_.control_callback([self = this->shared_from_this()](websocket::frame_type kind, beast::string_view payload) {
             if (kind == websocket::frame_type::ping) {
@@ -223,9 +223,10 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     auto self = shared_from_this();
     ws_.async_read(buffer_, [this,self](auto ec, std::size_t){
       if (ec) {
-        std::cerr << "Client WebSocket read error: " << ec.message() << "\n";
+        std::cerr << "Ws Client: Client WebSocket read error: " << ec.message() << "\n";
 
         if( (state_ != WsClientState::Disconnected) && on_closed_ ) {
+          std::cout<<"Ws Client: callign on_closed_()"<<"\n";
           on_closed_();
         }
 
@@ -423,6 +424,11 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     this->close();
     return f;
   }
+
+  // what should this method do?
+  // void reset() {
+  //   ;//
+  // }
 };
 
 #endif // WS_CLIENT_HPP

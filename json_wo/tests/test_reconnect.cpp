@@ -1,11 +1,9 @@
 #include <gtest/gtest.h>
-#include <chrono>
-#include "test_server.hpp"
-#include "reconnect.hpp"
+#include <boost/asio/io_context.hpp>
+
+#include "client_loop.hpp"
 #include "ws_client.hpp"
-#include "session.hpp"
-#include "reconnect_glue.hpp"
-#include "test_harness.hpp"
+
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;

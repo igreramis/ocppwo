@@ -103,3 +103,246 @@ Worked through real reliability problems: reconnect state machines, backoff/jitt
 Explored API design tradeoffs: callbacks + timers vs promise/future wrappers for connection lifecycle and in-flight requests.
 Also added practical test hooks/telemetry: forced disconnect paths, event timestamps, and reconnect metrics for diagnostics.
 #linkedin post#
+
+#compilation hotspots
+	-move boost/beast.hpp and boost/beast/websocket.hpp out of headers into .cpp
+	-use forward decl. + PIMPL for members that require Beast/WebSocket
+		-how?
+	-stop reincluding stuff
+		-ocpp_model.hpp
+		-test_server.hpp
+		-ws_client.hpp
+		-session.hpp
+		-reconnect_glue.hpp
+	-keep data structs in a light header
+	-move to_json/from_json, parse_frame etc. into a .cpp file
+	-mvoe to objects compiled once and link each test binary against those objects
+
+
+#why impl was suggested to have unique_ptr in this implementation? what assumptions did you have about reconnect
+#and wsclient for this suggestion?
+
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+
+namespace boost::asio { class io_context; }
+
+class ClientLoop {
+public:
+    enum class State : std::uint8_t {
+        Offline,
+        Connecting,
+        Online,
+    };
+
+    struct Config {
+        std::string host = "127.0.0.1";
+        unsigned short port = 0;
+
+        // Optional knobs you can route into ReconnectController later.
+        // Keep Exercise 1 thin: policy can remain in ReconnectController.
+    };
+
+    // Factories allow tests to inject fakes and keep "single owner" here.
+    struct Factories {
+        // Create a new transport instance for each connection attempt.
+        std::function<std::unique_ptr<class WsClient>(boost::asio::io_context&)> make_transport;
+
+        // Create a new session for each successful connection.
+        std::function<std::unique_ptr<class Session>(boost::asio::io_context&, class WsClient&)> make_session;
+
+        // Optional: called whenever we transition Offline->Online
+        std::function<void()> on_online = [] {};
+        // Optional: called whenever we transition Online->Offline
+        std::function<void()> on_offline = [] {};
+    };
+
+    ClientLoop(boost::asio::io_context& ioc, Config cfg, Factories f);
+    ~ClientLoop();
+
+    ClientLoop(const ClientLoop&) = delete;
+    ClientLoop& operator=(const ClientLoop&) = delete;
+
+    void start();
+    void stop();
+
+    // Probes for tests
+    State state() const;
+    std::uint64_t connect_attempts() const;
+    std::uint64_t online_transitions() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+
+
+#include "client_loop.hpp"
+
+#include "reconnect.hpp"
+#include "session.hpp"
+#include "ws_client.hpp"
+
+#include <boost/asio/io_context.hpp>
+#include <utility>
+
+struct ClientLoop::Impl {
+    boost::asio::io_context& ioc;
+    Config cfg;
+    Factories f;
+
+    State st = State::Offline;
+    std::uint64_t attempts = 0;
+    std::uint64_t online_edges = 0;
+
+    // Own the lifecycle objects (resettable across reconnects)
+    std::unique_ptr<ReconnectController> rc;
+    std::unique_ptr<WsClient> transport;
+    std::unique_ptr<Session> session;
+
+    bool started = false;
+
+    Impl(boost::asio::io_context& i, Config c, Factories factories)
+        : ioc(i), cfg(std::move(c)), f(std::move(factories)) {}
+
+    void set_state(State s) {
+        if (st == s) return;
+
+        const bool was_online = (st == State::Online);
+        const bool now_online = (s == State::Online);
+
+        st = s;
+
+        if (!was_online && now_online) {
+            ++online_edges;
+            f.on_online();
+        } else if (was_online && !now_online) {
+            f.on_offline();
+        }
+    }
+
+    void teardown_connection() {
+        // Ensure the session sees close so it can fail pending calls, stop timers, etc.
+        // TODO(adapt): call whatever "on_close" / "stop" is appropriate in your Session.
+        if (session) {
+            // session->on_close();
+        }
+        session.reset();
+        transport.reset();
+    }
+
+    void wire_transport_callbacks() {
+        // Single owner rule: only ClientLoop wires these callbacks, once per transport instance.
+        // TODO(adapt): replace with your actual WsClient callback registration API.
+
+        // transport->set_on_open([this] { on_open(); });
+        // transport->set_on_close([this](/*...*/) { on_close(); });
+        // transport->set_on_message([this](std::string_view msg) { on_message(msg); });
+    }
+
+    void connect_now() {
+        ++attempts;
+        set_state(State::Connecting);
+
+        teardown_connection();
+
+        transport = f.make_transport(ioc);
+        wire_transport_callbacks();
+
+        // TODO(adapt): call your transport connect/start method.
+        // transport->connect(cfg.host, cfg.port);
+
+        // If your ReconnectController owns dialing instead, then connect_now() should
+        // delegate to rc, and rc should call back into on_open/on_close hooks.
+    }
+
+    // Called by transport when websocket is open
+    void on_open() {
+        // Create new Session per connection.
+        session = f.make_session(ioc, *transport);
+
+        set_state(State::Online);
+
+        // Exercise 2+ will hook "boot on connect" here (not in tests).
+        // e.g. session->start_boot();
+    }
+
+    void on_close() {
+        teardown_connection();
+        set_state(State::Offline);
+
+        // Schedule reconnect via ReconnectController
+        // TODO(adapt): create/configure rc and schedule next attempt.
+        // rc->schedule([this]{ connect_now(); });
+    }
+
+    void on_message(/*std::string_view*/ ) {
+        // TODO(adapt): forward message to session decode/router.
+        // session->on_message(msg);
+    }
+};
+
+ClientLoop::ClientLoop(boost::asio::io_context& ioc, Config cfg, Factories f)
+    : impl_(std::make_unique<Impl>(ioc, std::move(cfg), std::move(f))) {}
+
+ClientLoop::~ClientLoop() = default;
+
+void ClientLoop::start() {
+    if (impl_->started) return;
+    impl_->started = true;
+
+    // Keep Exercise 1 minimal: start in Offline, then begin connecting.
+    impl_->set_state(State::Offline);
+    impl_->connect_now();
+}
+
+void ClientLoop::stop() {
+    if (!impl_->started) return;
+    impl_->started = false;
+
+    impl_->teardown_connection();
+    impl_->set_state(State::Offline);
+
+    // TODO(adapt): stop/cancel reconnect controller timers if needed.
+    // if (impl_->rc) impl_->rc->stop();
+}
+
+ClientLoop::State ClientLoop::state() const { return impl_->st; }
+std::uint64_t ClientLoop::connect_attempts() const { return impl_->attempts; }
+std::uint64_t ClientLoop::online_transitions() const { return impl_->online_edges; }
+
+
+#include <gtest/gtest.h>
+#include <boost/asio/io_context.hpp>
+
+#include "client_loop.hpp"
+#include "ws_client.hpp"
+#include "session.hpp"
+
+TEST(ClientLoop, StartsOffline) {
+    boost::asio::io_context ioc;
+
+    ClientLoop::Config cfg;
+    cfg.host = "127.0.0.1";
+    cfg.port = 12345;
+
+    ClientLoop::Factories f;
+    f.make_transport = [](boost::asio::io_context& i) {
+        // TODO: swap to a fake WsClient if you have one.
+        return std::make_unique<WsClient>(i);
+    };
+    f.make_session = [](boost::asio::io_context& i, WsClient& ws) {
+        return std::make_unique<Session>(i, ws);
+    };
+
+    ClientLoop loop(ioc, cfg, std::move(f));
+
+    // Before start(): must be Offline and zero transitions.
+    EXPECT_EQ(loop.state(), ClientLoop::State::Offline);
+    EXPECT_EQ(loop.online_transitions(), 0u);
+}

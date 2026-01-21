@@ -103,7 +103,7 @@ void TestServer::start(){
 
                 // handle the signal/callback from WsServerSession when the connection has been closed
                 ss->on_close([this](){
-                    std::cout << "Client disconnected\n";
+                    std::cout << "Test Server: Client disconnected\n";
                     std::lock_guard<std::mutex> lock(mtx_);
                     client_disconnected = true;
                     last_boot_msg_id_.clear();

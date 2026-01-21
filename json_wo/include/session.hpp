@@ -70,15 +70,20 @@ struct Session {
   int heartbeat_interval_s{0};
 
   Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t, std::shared_ptr<SessionSignals> e) : io(io_), transport(t), session_signals(e) {
-    transport->on_message([this](std::string_view sv){
-        this->on_message(sv);
-    });
-    transport->on_close([this](){
-        this->on_close();
-    });
+    // transport->on_message([this](std::string_view sv){
+    //     this->on_message(sv);
+    // });
+    // transport->on_close([this](){
+    //     this->on_close();
+    // });
     //if we are passing it transport, then it should get the connected signal or not? and if it is getting the connected signals then the applkication shoulds
     //just waiut for the session boot notification accepted signal
   }
+
+    //for now, what should this method do?
+    // void reset() {
+    //   std::lock_guard<std::mutex> lg
+    // }
 
     std::unique_ptr<boost::asio::steady_timer> timer;
 
@@ -115,7 +120,8 @@ struct Session {
    //TODO: is this needed given ReconnectController now implements a similar actuation?
     void start(void)
     {
-        transport->start();
+      ;//
+        // transport->start();
     }
 
     /*

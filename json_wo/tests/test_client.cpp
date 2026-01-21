@@ -26,10 +26,13 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
     rcg_->rS->on_offline = [this](){
         std::cout << "ReconnectController: websocket offline" << "\n";
         online_ = false;
+        state_.store(TestClientState::Disconnected, std::memory_order_relaxed);
     };
 
     rcg_->rS->on_connecting = [this](){
         std::cout << "ReconnectController: websocket connecting..." << "\n";
+        connect_attempts_.fetch_add(1, std::memory_order_relaxed);
+        state_.store(TestClientState::Connecting, std::memory_order_relaxed);
     };
 
     rcg_->rS->on_connected = [this](){
@@ -39,6 +42,8 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
 
     rcg_->rS->on_online = [this](){
         online_ = true;
+        state_.store(TestClientState::Connected, std::memory_order_relaxed);
+        online_transitions_.fetch_add(1, std::memory_order_relaxed);
     };
 
     rcg_->rS->on_backoff_scheduled = [this](std::chrono::milliseconds backoff){
@@ -89,4 +94,14 @@ void TestClient::send_boot(std::function<void(const OcppFrame&)> cb) {
 
 void TestClient::send_authorize(std::function<void(const OcppFrame&)> cb) {
     ss_->send_call(Authorize{"ABC123"}, std::move(cb));
+}
+
+TestClientState TestClient::state() const {
+    return state_.load(std::memory_order_relaxed);
+}
+uint64_t TestClient::connect_attempts() const {
+    return connect_attempts_.load(std::memory_order_relaxed);
+}
+uint64_t TestClient::online_transitions() const {
+    return online_transitions_.load(std::memory_order_relaxed);
 }

@@ -196,6 +196,68 @@
         }
     },
     {
+        "label": "build and run e2e tests",
+        "type": "shell",
+        "command": "g++",
+        "args": [
+            "-std=c++17",
+            "-I./include",
+            "${workspaceFolder}/tests/test_e2e.cpp",
+            "${workspaceFolder}/tests/test_harness.cpp",
+            "${workspaceFolder}/tests/test_server.cpp",
+            "${workspaceFolder}/tests/test_client.cpp",
+            "${workspaceFolder}/router.cpp",
+            "${workspaceFolder}/ocpp_model.cpp",
+            "${workspaceFolder}/client_loop.cpp",
+            "-o",
+            "tests/test_e2e",
+            "-lboost_system",
+            "-lgtest",
+            "-lgtest_main",
+            "-pthread",
+            "&&",
+            "./tests/test_e2e"
+        ],
+        "group": {
+            "kind": "build",
+            "isDefault": false
+        }
+    },
+    // {
+    //   "label": "build and run e2e tests (clang, -ftime-trace, per-TU objects)",
+    //   "type": "shell",
+    //   "command": "bash",
+    //   "args": [
+    //     "-lc",
+    //     "set -euo pipefail; \
+    //     mkdir -p build/obj; \
+    //     CXX=clang++; \
+    //     CXXFLAGS='-std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace'; \
+    //     $CXX $CXXFLAGS -c tests/test_e2e.cpp      -o build/obj/test_e2e.o; \
+    //     $CXX $CXXFLAGS -c router.cpp             -o build/obj/router.o; \
+    //     $CXX $CXXFLAGS -c ocpp_model.cpp         -o build/obj/ocpp_model.o; \
+    //     $CXX $CXXFLAGS -c tests/test_server.cpp  -o build/obj/test_server.o; \
+    //     $CXX $CXXFLAGS -c tests/test_client.cpp  -o build/obj/test_client.o; \
+    //     $CXX $CXXFLAGS -c tests/test_harness.cpp -o build/obj/test_harness.o; \
+    //     $CXX build/obj/test_e2e.o build/obj/router.o build/obj/ocpp_model.o build/obj/test_server.o build/obj/test_client.o build/obj/test_harness.o \
+    //           -o tests/test_e2e -lboost_system -lgtest -lgtest_main -pthread; \
+    //     ./tests/test_e2e"
+    //   ],
+    //   "group": { "kind": "build", "isDefault": false },
+    //   "problemMatcher": ["$gcc"]
+    // },
+    {
+      "label": "build and run e2e tests (clang, -ftime-trace, per-TU objects)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; set -x; mkdir -p build/obj; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c tests/test_e2e.cpp -o build/obj/test_e2e.o; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c router.cpp -o build/obj/router.o; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c ocpp_model.cpp -o build/obj/ocpp_model.o; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c tests/test_server.cpp -o build/obj/test_server.o; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c tests/test_client.cpp -o build/obj/test_client.o; clang++ -std=c++17 -O0 -g -I./include -I./tests -pthread -ftime-trace -c tests/test_harness.cpp -o build/obj/test_harness.o; clang++ build/obj/test_e2e.o build/obj/router.o build/obj/ocpp_model.o build/obj/test_server.o build/obj/test_client.o build/obj/test_harness.o -o tests/test_e2e -lboost_system -lgtest -lgtest_main -pthread; ./tests/test_e2e"
+      ],
+      "group": { "kind": "build", "isDefault": false },
+      "problemMatcher": ["$gcc"]
+    },
+    {
       "label": "build-and-run-integration-tests",
       "type": "shell",
       "command": "g++",

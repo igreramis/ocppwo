@@ -13,6 +13,15 @@ using tcp = boost::asio::ip::tcp;
 using namespace std;
 using Ms = std::chrono::milliseconds;
 
+/*
+    -threading
+        the threading pattern use in a lot of tests in this file is that of running a single thread such that io_context and 
+        the tests run on that same thread. in this approach, we run io.poll()/io.run_for() in the same thread as assertions
+        and additoinally only check probes after we've pumped the event loop.
+        in contrast, a different approach to this would be where tests read probes while the event loop might still be
+        running. that appraoch is considered a multi threaded approach. examples where tests are structured in that way can be
+        found in test_reconnect.cpp and test_router.cpp.
+ */
 struct FakeTransport : Transport {
     void start(){
         ;
@@ -97,6 +106,9 @@ TEST(Session, CanCaptureOutboundAndInjectInboundWithoutSockets){
     auto message_id = std::get<Call>(f).messageId;
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallResult cr{3, message_id, resp};
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
 }
@@ -126,6 +138,9 @@ TEST(Session, ReplyResolvesOnceAndClearsPending){
     auto message_id = std::get<Call>(f).messageId;
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallResult cr{3, message_id, resp};
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
     ASSERT_EQ(s.pending.size(), 0) << "Expected no pending calls after reply has been processed";
@@ -153,6 +168,9 @@ TEST(Session, CallResultResolvesPendingExactlyOnce){
     auto message_id = std::get<Call>(f).messageId;
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallResult cr{3, message_id, resp};
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
     
@@ -185,6 +203,11 @@ TEST(Session, CallErrorResolvesPendingExactlyOnce){
     auto message_id = std::get<Call>(f).messageId;
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallError ce{4, message_id, "InternalError", "simulated error", json::object()};
+
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
+
     tOps_->inject_inbound_text(json(ce).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallError";
     
@@ -233,6 +256,9 @@ TEST(Session, TransportCloseResolvesAllPendingAndClearsIt) {
 
     int resolved = 0;
 
+    tOps_->on_close([&s](){
+        s.on_close();
+    });
     s.send_call(BootNotification{"X100", "OpenAI"}, [&](const OcppFrame& f){
         ASSERT_TRUE(std::holds_alternative<CallError>(f));
         ASSERT_EQ(std::get<CallError>(f).errorCode, "ConnectionClosed");
@@ -270,6 +296,10 @@ TEST(Session, UnmatchedRepliesAreCountedAndIgnored){
     //send a reply with an unmatched id
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallResult cr{3, "unmatched_id", resp};
+
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
 
     tOps_->inject_inbound_text(json(cr).dump());
 
@@ -311,6 +341,9 @@ TEST(Session, MismatchedReplyPayloadResolvesProtocolError){
 
     //i want to make a CallResult with wrong payload type.
     CallResult cr{3, message_id, json::object({{"unexpected_field", 123}})};
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });    
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_TRUE(replied_) << "Expected reply callback to have been invoked upon inbound CallResult";
     ASSERT_TRUE(std::holds_alternative<CallError>(got)) << "Expected CallError";
@@ -339,6 +372,9 @@ TEST(Session, TimeoutIsCancelledOnCallResult) {
 
     BootNotificationResponse resp{"2024-01-01T00:00:00Z", 10, "Accepted"};
     CallResult cr{3, message_id, resp};
+    tOps_->on_message([&s](std::string_view sv){
+        s.on_message(sv);
+    });
     tOps_->inject_inbound_text(json(cr).dump());
     ASSERT_EQ(resolved, 1) << "Expected only one resolution of the pending call (no timeout after CallResult)";
     //wait for 2 seconds to see if timeout happens
