@@ -105,7 +105,6 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
                 //-schedule reconnect
                 //-
                 s->transport->on_close([wk, cb](){
-                    std::cout<<"tOps: async_open->close entered\n";
                     cb(false);
                     std::cout<<"tOps: async_open->close finished\n";
                     //you need to pass reconnect here.

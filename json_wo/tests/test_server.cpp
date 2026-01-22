@@ -174,6 +174,7 @@ void TestServer::stop(){
 }
 
 void TestServer::set_boot_conf(const std::string& msg_id, int heartbeat_interval_seconds){
+    (void)msg_id;
     heartbeat_interval_ = heartbeat_interval_seconds;
 }
 

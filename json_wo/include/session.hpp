@@ -483,6 +483,7 @@ struct Session {
           std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
           state = State::Ready;
           heartbeat_interval_s = resp.interval;
+          start_heartbeat(resp.interval);
           if (session_signals && session_signals->on_boot_accepted)
           {
             session_signals->on_boot_accepted();

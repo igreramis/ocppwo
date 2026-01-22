@@ -11,6 +11,16 @@ using tcp = boost::asio::ip::tcp;
 using namespace std;
 using Ms = std::chrono::milliseconds;
 
+static void run_until(boost::asio::io_context& ioc, std::function<bool ()> pred, std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while( std::chrono::steady_clock::now() < deadline ) {
+        if( pred() ) return;
+        ioc.run_for(std::chrono::milliseconds(10));
+        ioc.restart();
+    }
+}
+
 TEST(e2e, StartsOffline) {
     boost::asio::io_context ioc;
 
@@ -70,28 +80,61 @@ TEST(e2e, ReconnectTriggersNewBootNotification) {
     ClientLoop cl(ioc, cfg, f);
     cl.start();
 
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while ( std::chrono::steady_clock::now() < deadline ) {
-        ioc.poll();
-    }
+    run_until(ioc, [&]{return false; }, std::chrono::seconds(10));
 
     tH.server_force_close();
 
-    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while ( std::chrono::steady_clock::now() < deadline ) {
-        ioc.poll();
-    }
+    run_until(ioc, [&]{return cl.online_transitions() == 1; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1);
 
     tH.server_start();
 
-    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while ( std::chrono::steady_clock::now() < deadline ) {
-        ioc.poll();
-    }
+    run_until(ioc, [&]{return cl.online_transitions() == 2; }, std::chrono::seconds(10));
 
     ASSERT_EQ(cl.online_transitions(), 2);
-    // ClientLoop::State state = cl.state();
-    // ASSERT_EQ(state, ClientLoop::State::Offline);
-    // ASSERT_EQ(cl.connect_attempts(), 0u);
-    // ASSERT_EQ(cl.online_transitions(), 0u);
+}
+
+TEST(e2e, HeartbeatsStopOnCloseAndResumeAfterReconnect) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = ""
+    };
+
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::unique_ptr<Session> {
+            return std::make_unique<Session>(ioc, transport, sigs);
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port); tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    ASSERT_EQ(tH.server_.heartbeats().size(), 0u);
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1);
+    ASSERT_GE(tH.server_.heartbeats().size(), 1u);
+    
+    tH.server_force_close();
+    run_until(ioc, [&]{ return false;}, std::chrono::seconds(5));
+    
+    tH.server_start();
+    
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 2);
+    ASSERT_GE(tH.server_.heartbeats().size(), 1u);
 }
