@@ -71,8 +71,8 @@ TEST(e2e, ReconnectTriggersNewBootNotification) {
         .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
             return std::make_shared<WsClient>(ioc, host, port);
         },
-        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::unique_ptr<Session> {
-            return std::make_unique<Session>(ioc, transport, sigs);
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            return std::make_shared<Session>(ioc, transport, sigs);
         }
     };
 
@@ -115,8 +115,8 @@ TEST(e2e, HeartbeatsStopOnCloseAndResumeAfterReconnect) {
         .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
             return std::make_shared<WsClient>(ioc, host, port);
         },
-        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::unique_ptr<Session> {
-            return std::make_unique<Session>(ioc, transport, sigs);
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            return std::make_shared<Session>(ioc, transport, sigs);
         }
     };
 
@@ -137,4 +137,63 @@ TEST(e2e, HeartbeatsStopOnCloseAndResumeAfterReconnect) {
     run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
     ASSERT_EQ(cl.online_transitions(), 2);
     ASSERT_GE(tH.server_.heartbeats().size(), 1u);
+}
+
+TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = ""
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port); 
+    tH.server_.enable_manual_replies(true); tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
+
+    std::promise<bool> p;
+    auto f_p = p.get_future();
+    if( auto session = session_wk.lock())
+    {
+        session->send_call(HeartBeat{}, [&p](const OcppFrame &frame){
+            if( std::holds_alternative<CallError>(frame) ) {
+                p.set_value(true);
+            }
+        });
+    }
+    
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
+    tH.server_force_close();
+
+    run_until(ioc, [&]{ return false;}, std::chrono::seconds(5));
+    
+    ASSERT_EQ(f_p.get(), true);
+    tH.server_start();
+    
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 2);
 }

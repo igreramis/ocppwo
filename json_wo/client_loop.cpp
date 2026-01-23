@@ -26,7 +26,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
     std::shared_ptr<ReconnectController> rc; //why shared_ptr? because the controller uses weak_from_this()
     std::shared_ptr<WsClient> transport; //why shared_ptr? because we need to pass shared_ptr instances to call backs
     std::shared_ptr<SessionSignals> session_sigs = std::make_shared<SessionSignals>();
-    std::unique_ptr<Session> session; //why unique_ptr? because only Impl owns the session
+    std::shared_ptr<Session> session; //why unique_ptr? because only Impl owns the session. but this creates a problem when writing unit tests. hence make it shared_ptr.
 
     // Probe state
     //why are the following atomics? 
