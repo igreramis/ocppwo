@@ -16,9 +16,8 @@ TestServer::TestServer(asio::io_context& ioc, unsigned short port):
 }
 
 void TestServer::start(){
-    std::function<void()> do_accept;
-    do_accept = [this, do_accept]() {
-        acc_.async_accept([this, do_accept](boost::system::error_code ec, tcp::socket s) {
+    do_accept = [this]() {
+        acc_.async_accept([this](boost::system::error_code ec, tcp::socket s) {
             if (!ec) {
                 std::cout << "New client connected from " << s.remote_endpoint() << "\n";
 
@@ -34,10 +33,20 @@ void TestServer::start(){
                 
                 ss = std::make_shared<WsServerSession>(std::move(s));
                 std::weak_ptr<WsServerSession> wss = ss;
-                if(close_policy_.close_after_handshake){
-                    ss->close();
-                    return;
-                }
+                // if(close_policy_.close_after_handshake){
+                //     ss->close();
+                //     return;
+                // }
+
+                ss->on_open([this, wss](){
+                    if( auto ws_server = wss.lock() ){
+                        if(close_policy_.close_after_handshake){
+                            ws_server->close();
+                            return;
+                        }
+                    }
+                });
+
                 ss->on_message([this, wss](std::string_view msg){
                     if(close_policy_.close_after_first_message && first_message_seen_){
                         first_message_seen_ = true;
@@ -114,7 +123,7 @@ void TestServer::start(){
 
                 arm_close_timer_();
             }
-            // do_accept();
+            do_accept();
         });
     };
     do_accept();

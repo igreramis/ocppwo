@@ -124,6 +124,30 @@ struct Session {
         // transport->start();
     }
 
+    // start_heartbeat()
+    //
+    // Brief:
+    // Starts session's periodic HeartBeat loop as per heartbeat time provided
+    // by the server. Schedules a timer for `heartbeat_interval_s` by calling start_heartbeat(int).
+    //
+    // Trigger:
+    //  expected to be called externally, likely by reconnect module's indicator for system online
+    // Testing:
+    //   Not designed to be tested.
+    //
+    // Notes / constraints:
+    // - Passing `interval_seconds <= 0` should be treated as "disable heartbeats" (no timer),
+    //   otherwise a 0-second interval can cause a tight reschedule loop.
+    // - The loop runs on the Session's io_context and stops when the timer is cancelled or
+    //   the Session is closed/reset (timer destroyed/cancelled).
+    void start_heartbeat( void )
+    {
+      if( heartbeat_interval_s > 0 )
+      {
+        start_heartbeat(heartbeat_interval_s);
+      }
+    }
+
     /*
     * start_heartbeat(int interval)
     *
@@ -133,8 +157,7 @@ struct Session {
     *   and restarts the heartbeat timer.
     *
     * Trigger:
-    *   Called by higher-level session code (e.g. after connection/boot completes)
-    *   or tests to begin periodic liveness checks.
+    *   Called either locally by start_heartbeat() or by tests to begin periodic liveness checks.
     *
     * Purpose:
     *   - Keep the peer informed (and detect liveness) by sending periodic HeartBeat
@@ -483,7 +506,7 @@ struct Session {
           std::cout << "BootNotification accepted, current time: " << resp.currentTime << "\n";
           state = State::Ready;
           heartbeat_interval_s = resp.interval;
-          start_heartbeat(resp.interval);
+          // start_heartbeat(resp.interval);
           if (session_signals && session_signals->on_boot_accepted)
           {
             session_signals->on_boot_accepted();
@@ -516,3 +539,8 @@ private:
 //threads for increasing throughput for apps
   std::atomic<uint64_t> unmatched_replies_{0};
 };
+
+/*todo
+-add a getter method for the interval being used for heartbeat
+  -consdier the units, whether it should be int or chrono duration
+*/

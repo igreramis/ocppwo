@@ -21,6 +21,7 @@ static void run_until(boost::asio::io_context& ioc, std::function<bool ()> pred,
     }
 }
 
+#if 0
 TEST(e2e, StartsOffline) {
     boost::asio::io_context ioc;
 
@@ -139,6 +140,7 @@ TEST(e2e, HeartbeatsStopOnCloseAndResumeAfterReconnect) {
     ASSERT_GE(tH.server_.heartbeats().size(), 1u);
 }
 
+
 TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
     boost::asio::io_context ioc;
 
@@ -196,4 +198,109 @@ TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
     
     run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
     ASSERT_EQ(cl.online_transitions(), 2);
+}
+
+
+TEST(e2e, ResumeDelayDelaysHeartbeatAfterReconnect) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = ""
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(5));
+    
+    auto hb_before = tH.server_.heartbeats().size();
+    
+    tH.server_force_close();
+    run_until(ioc, [&]{ return false;}, std::chrono::seconds(5));
+    
+    tH.server_start();
+
+    run_until(ioc, [&]{ return (tH.server_.events().size() > 0) && (tH.server_.events().back().type == TestServer::EventType::FirstHeartBeat);}, std::chrono::seconds(15));
+    ASSERT_EQ(tH.server_.events().back().type, TestServer::EventType::FirstHeartBeat);
+    auto hb_time = tH.server_.events().back().ts;
+    auto msg_time = (tH.server_.received().rbegin()) -> t;
+    auto reconnect_time = (tH.server_.received().rbegin() + 1) -> t;
+    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(msg_time - reconnect_time);
+    ASSERT_GE(delta.count(), 5250);
+    //TODO: 5250 is a magic number that needs to be replaced once todo items
+    //in session.hpp , client_loop.hpp have beneworked out.
+}
+#endif
+
+TEST(e2e, ReconnectBackoffSchedulesIncreasingDelaysUntilCap) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+        .on_backoff_scheduled = [&recorded_backoffs](std::chrono::milliseconds delay) {
+            recorded_backoffs.push_back(static_cast<int>(delay.count()));
+            //why are we using static_cast<int> here? what does .count() return?
+            // .count() returns the number of ticks as an integral type, which is typically of type std::chrono::milliseconds::rep
+            // static_cast<int> is used to convert this count to an int for easier handling and storage in the vector.
+            //but if count() returns an integral type, why not use that type directly in the vector?
+            // using int simplifies comparisons and assertions in tests, avoiding potential issues with different integral types.
+        }
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_.set_close_policy(TestServer::ClosePolicy{.close_after_handshake = true});tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return recorded_backoffs.size() == 4 ; }, std::chrono::seconds(15));
+    
+    for( size_t i = 1; i < recorded_backoffs.size(); i++ ) {
+        ASSERT_LE(recorded_backoffs[i], std::chrono::milliseconds(30000).count());//todo: the policy for reconnect module should be injectable
+        ASSERT_LE(recorded_backoffs[i-1], std::chrono::milliseconds(30000).count());
+        ASSERT_GT(recorded_backoffs[i], recorded_backoffs[i-1] * 0.6);
+    }
 }

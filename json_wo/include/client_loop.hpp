@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <chrono>
 namespace boost::asio { class io_context; }
 
 struct WsClient;
@@ -19,6 +20,8 @@ class ClientLoop {
         std::string host = "127.0.0.1";
         unsigned short port = 0;
         std::string url; //optional; if empty, a ws://host:port style URL can be built by caller
+        //handle for unit tests to know about the backoff duration scheduled
+        std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;
     };
 
     //functors for WsClient and Session
@@ -47,3 +50,8 @@ private:
     struct Impl;
     std::shared_ptr<Impl> impl_;
 };
+
+/*todo
+-take as input the policy structure that you pass onto Reconnect. this way,
+you can use different configurations from unit tests.
+*/

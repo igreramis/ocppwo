@@ -14,6 +14,7 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   websocket::stream<tcp::socket> ws_;
   beast::flat_buffer buffer_;
   std::function<void(std::string_view)> on_message_;
+  std::function<void()> on_open_;
   std::function<void()> on_closed_;
   std::function<void(const Call&, std::function<void(const OcppFrame&)>)> on_call_;
   std::deque<std::shared_ptr<std::string>> write_queue_;
@@ -44,6 +45,8 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
   //     executor for this websocket stream).
   void on_call(std::function<void(const Call&, std::function<void(const OcppFrame&)>)> cb){on_call_ = std::move(cb);}
   
+  void on_open(std::function<void()> cb) { on_open_ = std::move(cb); };
+
   //   Register a callback invoked when the server-side WebSocket session transitions
   //   to closed, or when a read error causes the session to stop processing.
   //
@@ -94,6 +97,9 @@ struct WsServerSession : Transport, std::enable_shared_from_this<WsServerSession
       }
       state_ = WsServerSessionState::Connected;
       std::cout<<"WebSocket handshake accepted"<<std::endl;
+      
+      if( on_open_ ) on_open_();
+
       do_read();
     });
   }

@@ -19,31 +19,32 @@ namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 
 class TestServer {
-
-    struct ClosePolicy {
-        bool close_after_handshake = false;
-        bool close_after_first_message = false;
-        std::chrono::milliseconds close_after_ms{-1};
-    };
-    
-    enum class EventType {
-        Connect,
-        Reconnect,
-        BootAccepted,
-        FirstHeartBeat,
-        Disconnect
-    };
-    struct Event {
-        EventType type;
-        std::chrono::steady_clock::time_point ts;
-    };
-
     struct Frame {
         std::string text;
         std::chrono::steady_clock::time_point t;
     };
 
     public:
+        struct ClosePolicy {
+            bool close_after_handshake = false;
+            bool close_after_first_message = false;
+            std::chrono::milliseconds close_after_ms{-1};
+        };
+
+        enum class EventType {
+            Connect,
+            Reconnect,
+            BootAccepted,
+            FirstHeartBeat,
+            Disconnect
+        };
+
+        struct Event {
+            EventType type;
+            std::chrono::steady_clock::time_point ts;
+        };
+
+
         TestServer(asio::io_context& ioc, unsigned short port);
         void start();
         void stop();
@@ -60,6 +61,7 @@ class TestServer {
         std::vector<std::string> received_call_message_ids() const;
         bool send_stored_reply_for(const std::string& message_id);
         private:
+        std::function<void()> do_accept;
         struct StoredReply {
             std::string message_id;
             std::string reply_text;

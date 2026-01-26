@@ -130,7 +130,15 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
             [wk](std::function<void()> cb){
                 auto s = wk.lock();
                 if(!s){ return; }
-                cb();
+                auto prev = s->transport->on_closed_;
+                std::shared_ptr<bool> completed = std::make_shared<bool>(false);
+                s->transport->on_close([cb, prev, completed](){
+                    if(prev) prev();
+                    if(*completed) return;
+                    *completed = true;
+                    cb();
+                    std::cout<<"client_loop: async_close->close finished\n";
+                });
                 s->transport->close();
             },
             [wk](std::chrono::milliseconds delay, std::function<void()> cb) -> uint64_t {
@@ -209,6 +217,13 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
             }
         };
 
+        sigs->on_online = [wk] {
+            if( auto self = wk.lock()) {
+                self->set_state(State::Online);
+                self->session->start_heartbeat();
+            }
+        };
+
         sigs->on_offline = [wk] {
             if( auto self = wk.lock()) {
                 self->reset_connection_objects();
@@ -217,6 +232,16 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
         };
 
         //on_closed/on_backoff_scheduled omitted for now
+        sigs->on_backoff_scheduled = [wk](std::chrono::milliseconds delay){
+            std::cout<<"backoff scheduled for "<<delay.count()<<" ms\n";
+            if( auto self = wk.lock() )
+            {
+                if( self->cfg.on_backoff_scheduled  )
+                {
+                    self->cfg.on_backoff_scheduled(delay);
+                }
+            }
+        };
     }
 
     void start_controller() {
@@ -230,6 +255,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
 
         const std::string url = !cfg.url.empty() ? cfg.url : "ws://" + cfg.host + ":" + std::to_string(cfg.port);
         rc->start(url);
+
     }
 
     void stop_controller() {

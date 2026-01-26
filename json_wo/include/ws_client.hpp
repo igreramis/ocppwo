@@ -164,6 +164,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         ws_.async_handshake(host_, "/", [this,self](auto ec){
           if (ec) {
             std::cerr << "WebSocket handshake error: " << ec.message() << "\n";
+            on_closed_(); // notify close on handshake failure
             return;
           }
 
