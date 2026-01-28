@@ -253,7 +253,7 @@ TEST(e2e, ResumeDelayDelaysHeartbeatAfterReconnect) {
     //TODO: 5250 is a magic number that needs to be replaced once todo items
     //in session.hpp , client_loop.hpp have beneworked out.
 }
-#endif
+
 
 TEST(e2e, ReconnectBackoffSchedulesIncreasingDelaysUntilCap) {
     boost::asio::io_context ioc;
@@ -303,4 +303,73 @@ TEST(e2e, ReconnectBackoffSchedulesIncreasingDelaysUntilCap) {
         ASSERT_LE(recorded_backoffs[i-1], std::chrono::milliseconds(30000).count());
         ASSERT_GT(recorded_backoffs[i], recorded_backoffs[i-1] * 0.6);
     }
+}
+#endif
+
+TEST(e2e, MessageHandlerIsNotDuplicatedAcrossReconnects) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return false ; }, std::chrono::seconds(10));
+
+    tH.server_force_close();
+    
+    run_until(ioc, [&]{ return cl.state() == ClientLoop::State::Offline; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.state(), ClientLoop::State::Offline);
+
+    tH.server_start();
+    run_until(ioc, [&]{ return cl.state() == ClientLoop::State::Online; }, std::chrono::seconds(10));
+
+    ASSERT_EQ(cl.state(), ClientLoop::State::Online);
+
+    auto session = session_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(session));
+    auto baseline_unmatched = session->unmatched_replies();
+
+    std::promise<void> got_reply;
+    auto f_got_reply = got_reply.get_future();
+    tH.server_.enable_manual_replies(true);
+    session->send_call(HeartBeat{}, [&got_reply](const OcppFrame& f){
+        got_reply.set_value();
+    });
+
+    run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(5));
+    auto ids = tH.server_.received_call_message_ids();
+    ASSERT_FALSE(ids.empty());
+    ASSERT_TRUE(tH.server_.send_stored_reply_for(ids.back()));
+
+    run_until(ioc, [&]{
+        return f_got_reply.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    },std::chrono::seconds(5));
+
+    ASSERT_EQ(session->unmatched_replies(), baseline_unmatched);
 }

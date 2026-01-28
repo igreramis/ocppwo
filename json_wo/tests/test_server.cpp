@@ -81,6 +81,8 @@ void TestServer::start(){
                             }
                         }
                     }
+
+                    //todo: put in note for when handle_incoming() is called
                     router_.handle_incoming(msg, [this](std::string&& reply){
                         bool manual = false;
                         {
