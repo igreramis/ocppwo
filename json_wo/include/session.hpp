@@ -182,6 +182,10 @@ struct Session {
                 return; // timer canceled = got reply
             }
             // send heartbeat
+            if(state != State::Ready) {
+              std::cerr<< "Session not online. Skipping heartbeat."<<"\n";
+              return;
+            }
             send_call(HeartBeat{},
                                 [interval, this](const OcppFrame& f){
                 if (std::holds_alternative<CallResult>(f)) {

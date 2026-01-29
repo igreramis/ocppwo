@@ -304,7 +304,6 @@ TEST(e2e, ReconnectBackoffSchedulesIncreasingDelaysUntilCap) {
         ASSERT_GT(recorded_backoffs[i], recorded_backoffs[i-1] * 0.6);
     }
 }
-#endif
 
 TEST(e2e, MessageHandlerIsNotDuplicatedAcrossReconnects) {
     boost::asio::io_context ioc;
@@ -372,4 +371,73 @@ TEST(e2e, MessageHandlerIsNotDuplicatedAcrossReconnects) {
     },std::chrono::seconds(5));
 
     ASSERT_EQ(session->unmatched_replies(), baseline_unmatched);
+}
+#endif
+
+TEST(e2e, HeartbeatDoesNotSendBeforeBootAccepted) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port); tH.server_.enable_manual_replies(true);tH.server_.set_boot_conf("", /*1s*/ 1);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    //run until session_wk is valid. it implements bool()
+
+    run_until(ioc, [&]{ return static_cast<bool>(session_wk.lock()); }, std::chrono::seconds(5));
+    auto session = session_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(session));
+
+    session->start_heartbeat(1);
+    //you are assuming that only the BootNotification would be sent out
+    //send out BN
+    //delay BNR
+    //check if HB was withheld
+    //
+    //received_call_message_ids(), note down size. should be 1. 
+    //or note down call id. force resposne. advance to total of three secodns.
+    //2 packets should've arrived only.
+
+    run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::milliseconds(1500));
+    auto recvd_calls = tH.server_.received_call_message_ids();
+    ASSERT_FALSE(recvd_calls.empty());
+
+    run_until(ioc, [&]{ return false ; }, std::chrono::milliseconds(1500));
+
+    ASSERT_EQ(tH.server_.heartbeats().size(), 0u);
+
+    tH.server_.send_stored_reply_for(recvd_calls.back());
+    
+    run_until(ioc, [&]{ return cl.online_transitions() >= 1; }, std::chrono::seconds(5));
+    ASSERT_GE(cl.online_transitions(), 1u);
+    
+    run_until(ioc, [&]{ return tH.server_.heartbeats().size() >= 1; }, std::chrono::seconds(5));
+    ASSERT_GE(tH.server_.heartbeats().size(), 1u);
+
+    tH.server_force_close();
 }
