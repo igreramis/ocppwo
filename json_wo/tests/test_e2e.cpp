@@ -372,7 +372,6 @@ TEST(e2e, MessageHandlerIsNotDuplicatedAcrossReconnects) {
 
     ASSERT_EQ(session->unmatched_replies(), baseline_unmatched);
 }
-#endif
 
 TEST(e2e, HeartbeatDoesNotSendBeforeBootAccepted) {
     boost::asio::io_context ioc;
@@ -440,4 +439,105 @@ TEST(e2e, HeartbeatDoesNotSendBeforeBootAccepted) {
     ASSERT_GE(tH.server_.heartbeats().size(), 1u);
 
     tH.server_force_close();
+}
+#endif
+
+TEST(e2e, FullLifecycleReconnectAndResumeHeartbeats) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = ""
+    };
+
+    std::weak_ptr<Session> session_wk;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
+            return std::make_shared<WsClient>(ioc, host, port);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
+            auto p = std::make_shared<Session>(ioc, transport, sigs);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_start();
+
+    auto event_count = [&](TestServer::EventType e)-> size_t {
+        size_t count = 0;
+        for( const auto &event : tH.server_.events() ) {
+            if( event.type == e ) {
+                count++;
+            }
+        }
+        return count;
+    };
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return cl.online_transitions() == 1; }, std::chrono::seconds(10));
+    run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 1; }, std::chrono::seconds(10));
+    run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 1; }, std::chrono::seconds(10));
+
+    ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 1u);
+    ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 1u);
+
+    //verify leaking(pending calls being ignored silently)
+    tH.server_.enable_manual_replies(true);
+    {
+        auto session = session_wk.lock();
+        ASSERT_TRUE(static_cast<bool>(session));
+        std::promise<bool> p_leak;
+        auto f_leak = p_leak.get_future();
+        run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(10));
+        session->send_call(HeartBeat{}, [&](const OcppFrame &f){
+            if( std::holds_alternative<CallError>(f) )
+            {
+                p_leak.set_value(true);
+            }
+        });
+        tH.server_force_close();
+        run_until(ioc, [&]{ return f_leak.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(11));
+        ASSERT_EQ(f_leak.get(), true);
+        ASSERT_TRUE(session->pending.empty());
+    }
+
+    tH.server_.enable_manual_replies(false);
+    //reconnect
+    tH.server_start();
+    run_until(ioc, [&]{ return cl.online_transitions() == 2; }, std::chrono::seconds(10));
+    run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 2; }, std::chrono::seconds(10));
+    run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 2; }, std::chrono::seconds(10));
+
+    ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 2u);
+    ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 2u);
+
+    tH.server_.enable_manual_replies(true);
+    auto session = session_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(session));
+    auto baseline = session->unmatched_replies();
+
+    std::promise<void> p_reconnect;
+    auto f_reconnect = p_reconnect.get_future();
+
+    session->send_call(HeartBeat{}, [&p_reconnect](const OcppFrame& f){
+        p_reconnect.set_value();
+    });
+    run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(5));
+    auto received_final = tH.server_.received_call_message_ids();
+    ASSERT_GT(received_final.size(), 0u);
+    tH.server_.send_stored_reply_for(received_final.back());
+    
+    run_until(ioc, [&]{ return f_reconnect.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(10));
+
+    ASSERT_EQ(baseline, session->unmatched_replies());
 }

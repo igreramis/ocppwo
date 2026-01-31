@@ -131,10 +131,6 @@ void TestServer::start(){
     do_accept();
 }
 
-void TestServer::do_read(){
-
-}
-
 OcppFrame TestServer::TestBootNotificationHandler(const BootNotification& b, const std::string& msgId)
 {
     if( b.chargePointModel.empty() || b.chargePointVendor.empty() )

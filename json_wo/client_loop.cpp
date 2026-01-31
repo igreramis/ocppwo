@@ -288,6 +288,42 @@ void ClientLoop::stop() {
     impl_->stop_controller();
 }
 
+// ---------------------------------------------------------------------
+// Probe: state()
+//
+// Returns:
+//   - Current high-level coordinator state, backed by `Impl::state_`.
+//
+// Persistence / reset behavior:
+//   - Changes over time as reconnect/boot/close events happen.
+//   - Typically transitions:
+//       Offline -> Connecting -> Online -> Offline -> ...
+//
+// Notes:
+//   - Read is atomic and uses relaxed ordering; tests should pump the io_context
+//     before asserting so async callbacks have a chance to run.
 ClientLoop::State ClientLoop::state() const { return impl_->state_.load(std::memory_order_relaxed); }
+
+// ---------------------------------------------------------------------
+// Probe: connect_attempts()
+//
+// Returns:
+//   - Count of connect attempts started by this ClientLoop instance,
+//     backed by `Impl::connect_attempts_`.
+//
+// Persistence / reset behavior:
+//   - Monotonically increases over the lifetime of the ClientLoop.
+//   - Not reset on reconnect.
 std::uint64_t ClientLoop::connect_attempts() const { return impl_->connect_attempts_.load(std::memory_order_relaxed); }
+
+// ---------------------------------------------------------------------
+// Probe: online_transitions()
+//
+// Returns:
+//   - Count of transitions into Online state, backed by
+//     `Impl::online_transitions_`.
+//
+// Persistence / reset behavior:
+//   - Monotonically increases over the lifetime of the ClientLoop.
+//   - Not reset on reconnect; intended for E2E assertions.
 std::uint64_t ClientLoop::online_transitions() const { return impl_->online_transitions_.load(std::memory_order_relaxed); }
