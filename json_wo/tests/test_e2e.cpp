@@ -21,7 +21,6 @@ static void run_until(boost::asio::io_context& ioc, std::function<bool ()> pred,
     }
 }
 
-#if 0
 TEST(e2e, StartsOffline) {
     boost::asio::io_context ioc;
 
@@ -140,7 +139,6 @@ TEST(e2e, HeartbeatsStopOnCloseAndResumeAfterReconnect) {
     ASSERT_GE(tH.server_.heartbeats().size(), 1u);
 }
 
-
 TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
     boost::asio::io_context ioc;
 
@@ -171,12 +169,14 @@ TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
     };
 
     TestHarness tH(ioc, "127.0.0.1", port); 
-    tH.server_.enable_manual_replies(true); tH.server_start();
+    tH.server_start();
+
     ClientLoop cl(ioc, cfg, f);
     cl.start();
 
     run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
 
+    tH.server_.enable_manual_replies(true);
     std::promise<bool> p;
     auto f_p = p.get_future();
     if( auto session = session_wk.lock())
@@ -187,14 +187,17 @@ TEST(e2e, ServerCloseFailsPendingCallsAndReconnects) {
             }
         });
     }
-    
+    run_until(ioc, [&]{ return false; }, std::chrono::seconds(5));
+    tH.server_.send_stored_reply_for(tH.server_.received_call_message_ids().back());
     run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
     tH.server_force_close();
 
-    run_until(ioc, [&]{ return false;}, std::chrono::seconds(5));
+    run_until(ioc, [&]{ return cl.state() == ClientLoop::State::Offline;}, std::chrono::seconds(5));
+    ASSERT_EQ(cl.state(), ClientLoop::State::Offline);
     
     ASSERT_EQ(f_p.get(), true);
-    tH.server_start();
+
+    tH.server_.enable_manual_replies(false);tH.server_start();
     
     run_until(ioc, [&]{ return false; }, std::chrono::seconds(10));
     ASSERT_EQ(cl.online_transitions(), 2);
@@ -304,6 +307,7 @@ TEST(e2e, ReconnectBackoffSchedulesIncreasingDelaysUntilCap) {
         ASSERT_GT(recorded_backoffs[i], recorded_backoffs[i-1] * 0.6);
     }
 }
+
 
 TEST(e2e, MessageHandlerIsNotDuplicatedAcrossReconnects) {
     boost::asio::io_context ioc;
@@ -440,7 +444,7 @@ TEST(e2e, HeartbeatDoesNotSendBeforeBootAccepted) {
 
     tH.server_force_close();
 }
-#endif
+
 
 TEST(e2e, FullLifecycleReconnectAndResumeHeartbeats) {
     boost::asio::io_context ioc;
