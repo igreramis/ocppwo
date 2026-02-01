@@ -7,6 +7,7 @@
 #include "ocpp_model.hpp"
 #include "transport.hpp"
 #include <mutex>
+#include "metrics.hpp"
 
 /*
  * Session
@@ -57,6 +58,7 @@ struct Session {
   std::shared_ptr<Transport> transport;
   std::shared_ptr<SessionSignals> session_signals;
   std::mutex pending_mtx;
+  Metrics& metrics_;
   struct Pending {
     std::unique_ptr<boost::asio::steady_timer> timer;
     std::function<void(const OcppFrame&)> resolve;//callback to resolve the pending call
@@ -68,7 +70,7 @@ struct Session {
   //method definitions
   int heartbeat_interval_s{0};
 
-  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t, std::shared_ptr<SessionSignals> e) : io(io_), transport(t), session_signals(e) {
+  Session(boost::asio::io_context& io_, std::shared_ptr<Transport> t, std::shared_ptr<SessionSignals> e, Metrics &m) : io(io_), transport(t), session_signals(e), metrics_(m) {
     // transport->on_message([this](std::string_view sv){
     //     this->on_message(sv);
     // });
