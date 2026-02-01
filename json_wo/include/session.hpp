@@ -8,7 +8,6 @@
 #include "transport.hpp"
 #include <mutex>
 
-
 /*
  * Session
  *

@@ -5,13 +5,14 @@
 #include <memory>
 #include <string>
 #include <chrono>
+#include "metrics.hpp"
 namespace boost::asio { class io_context; }
 
 struct WsClient;
 class Session;
 struct SessionSignals;//fwd decl
 struct Transport;
-
+struct Metrics;
 
 class ClientLoop {
     public:

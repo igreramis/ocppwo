@@ -7,6 +7,7 @@
 #include <deque>
 #include "transport.hpp"
 #include "signals.hpp"
+#include "metrics.hpp"
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -57,14 +58,16 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   std::atomic<unsigned> writes_in_flight_{0}, max_writes_in_flight_{0};
   std::atomic<unsigned> max_write_queue_depth_{0}, current_write_queue_depth_{0};
   enum class WsClientState {Disconnected, Connected, Connecting} state_{WsClientState::Disconnected};
+  Metrics &metrics_;
 
-
-  WsClient(boost::asio::io_context& io, std::string host, std::string port)
+  WsClient(boost::asio::io_context& io, std::string host, std::string port, Metrics &metrics)
     : res_(io),
       ws_(io),
       host_(std::move(host)),
       port_(std::move(port)),
-      strand_(ws_.get_executor()) {}
+      strand_(ws_.get_executor()),
+      metrics_(metrics)
+      {}
 
   // - Public API to register a callback for inbound WebSocket text messages.
   // - The callback is stored in on_message_ (single slot). A later call overwrites

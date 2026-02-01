@@ -40,6 +40,7 @@ public:
     boost::asio::io_context& io_;
     std::string host_;
     std::string port_;
+    Metrics metrics_;
     std::shared_ptr<WsClient> client_;
     std::shared_ptr<Session> ss_; std::shared_ptr<SessionSignals> sS_;
     std::weak_ptr<Session> wss_;

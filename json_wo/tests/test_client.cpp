@@ -3,7 +3,7 @@
 TestClient::TestClient(boost::asio::io_context& io, std::string host, std::string port)
     : io_(io), host_(std::move(host)), port_(std::move(port))
 {
-    client_ = std::make_shared<WsClient>(io_, host_, port_);
+    client_ = std::make_shared<WsClient>(io_, host_, port_, metrics_);
     sS_ = std::make_shared<SessionSignals>(SessionSignals{
         //on_boot_accepted
         [this](){
