@@ -569,7 +569,7 @@ TEST(Metrics, StartsAtZero) {
     ASSERT_EQ(m_snapshot.online_transitions, 0u);
 }
 
-TEST(Metrics, ReconnectTriggersNewBootNotification) {
+TEST(Metrics, CanReadMetricsFromClientLoop) {
     boost::asio::io_context ioc;
 
     //Pick an ephemeral port
@@ -586,30 +586,26 @@ TEST(Metrics, ReconnectTriggersNewBootNotification) {
         .url = ""
     };
 
-    Metrics metrics;
+    Metrics *metrics = nullptr;
     ClientLoop::Factories f{
-        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port)->std::shared_ptr<WsClient>{
-            return std::make_shared<WsClient>(ioc, host, port, metrics);
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            return std::make_shared<WsClient>(ioc, host, port, m);
         },
-        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs) -> std::shared_ptr<Session> {
-            return std::make_shared<Session>(ioc, transport, sigs);
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            return std::make_shared<Session>(ioc, transport, sigs, m);
         }
     };
 
-    // TestHarness tH(ioc, "127.0.0.1", port); tH.server_start();
+    TestHarness tH(ioc, "127.0.0.1", port); tH.server_start();
     ClientLoop cl(ioc, cfg, f);
-    // cl.start();
+    cl.start();
 
-    // run_until(ioc, [&]{return false; }, std::chrono::seconds(10));
+    run_until(ioc, [&]{return metrics != nullptr; }, std::chrono::seconds(10));
+    ASSERT_NE(metrics, nullptr);
 
-    // tH.server_force_close();
-
-    // run_until(ioc, [&]{return cl.online_transitions() == 1; }, std::chrono::seconds(10));
-    // ASSERT_EQ(cl.online_transitions(), 1);
-
-    // tH.server_start();
-
-    // run_until(ioc, [&]{return cl.online_transitions() == 2; }, std::chrono::seconds(10));
-
-    // ASSERT_EQ(cl.online_transitions(), 2);
+    auto snap = cl.metrics().snapshot();
+    ASSERT_EQ(snap.online_transitions, 0u);
 }

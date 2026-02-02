@@ -27,7 +27,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
     std::shared_ptr<WsClient> transport; //why shared_ptr? because we need to pass shared_ptr instances to call backs
     std::shared_ptr<SessionSignals> session_sigs = std::make_shared<SessionSignals>();
     std::shared_ptr<Session> session; //why unique_ptr? because only Impl owns the session. but this creates a problem when writing unit tests. hence make it shared_ptr.
-
+    Metrics metrics_;
     // Probe state
     //why are the following atomics? 
     // they can be used in a multithreading scenario:
@@ -81,7 +81,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
                     return;
                 }
 
-                s->transport = s->f.make_transport(s->ioc, s->cfg.host, std::to_string(s->cfg.port));
+                s->transport = s->f.make_transport(s->ioc, s->cfg.host, std::to_string(s->cfg.port), s->metrics_);
                 if( !s->transport )
                 {
                     cb(false);
@@ -95,7 +95,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
                         //create session
                         if( s->f.make_session )
                         {
-                            s->session = s->f.make_session(s->ioc, s->transport, s->session_sigs);
+                            s->session = s->f.make_session(s->ioc, s->transport, s->session_sigs, s->metrics_);
                         }
                     }
                     cb(true);
@@ -286,6 +286,14 @@ void ClientLoop::start() {
 
 void ClientLoop::stop() {
     impl_->stop_controller();
+}
+
+Metrics& ClientLoop::metrics() {
+    return impl_->metrics_;
+}
+
+const Metrics& ClientLoop::metrics() const {
+    return impl_->metrics_;
 }
 
 // ---------------------------------------------------------------------

@@ -27,10 +27,12 @@ class ClientLoop {
 
     //functors for WsClient and Session
     struct Factories {
-        std::function<std::shared_ptr<WsClient>(boost::asio::io_context&, std::string host, std::string port)> make_transport;
-        std::function<std::shared_ptr<Session>(boost::asio::io_context&, std::shared_ptr<Transport>, std::shared_ptr<SessionSignals>)> make_session;
+        std::function<std::shared_ptr<WsClient>(boost::asio::io_context&, std::string host, std::string port, Metrics&)> make_transport;
+        std::function<std::shared_ptr<Session>(boost::asio::io_context&, std::shared_ptr<Transport>, std::shared_ptr<SessionSignals>, Metrics&)> make_session;
     };
 
+    Metrics& metrics();
+    const Metrics& metrics() const;
     // ---------------------------------------------------------------------
     // Lifecycle: ClientLoop(ioc, cfg, factories)
     //

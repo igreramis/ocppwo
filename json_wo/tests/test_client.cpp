@@ -12,7 +12,7 @@ TestClient::TestClient(boost::asio::io_context& io, std::string host, std::strin
         }
     });
 
-    ss_ = std::make_shared<Session>(io_, client_, sS_);
+    ss_ = std::make_shared<Session>(io_, client_, sS_, metrics_);
     rcg_ = ReconnectGlue::create(client_, io_);
     wss_ = ss_;
 
