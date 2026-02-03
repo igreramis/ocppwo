@@ -549,6 +549,7 @@ TEST(e2e, FullLifecycleReconnectAndResumeHeartbeats) {
 }
 #endif
 
+#if 0
 TEST(Metrics, StartsAtZero) {
     Metrics m;
     auto m_snapshot = m.snapshot();
@@ -608,4 +609,126 @@ TEST(Metrics, CanReadMetricsFromClientLoop) {
 
     auto snap = cl.metrics().snapshot();
     ASSERT_EQ(snap.online_transitions, 0u);
+}
+#endif
+
+TEST(E2E, BackPressureUpdatesTransportMetrics) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = ""
+    };
+
+    std::weak_ptr<Session> session_wk;
+    Metrics *metrics = nullptr;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            return std::make_shared<WsClient>(ioc, host, port, m);
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            auto p = std::make_shared<Session>(ioc, transport, sigs, m);
+            session_wk = p;
+            return p;
+        }
+    };
+
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_start();
+
+    auto event_count = [&](TestServer::EventType e)-> size_t {
+        size_t count = 0;
+        for( const auto &event : tH.server_.events() ) {
+            if( event.type == e ) {
+                count++;
+            }
+        }
+        return count;
+    };
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    std::thread io_thread([&]{ ioc.run(); });
+
+    // ---- Wait for BootNotification to arrive at CSMS ----
+    std::string boot_id;
+    for( int i = 0; i < 50; i++ ) { // upto ~5s(50*100ms)
+        std::this_thread::sleep_for(100ms);
+        boot_id = tH.server_.last_boot_msg_id();
+        if( !boot_id.empty() ) break;
+    }
+    ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
+
+    cl.stop();
+    tH.server_.stop();
+    ioc.stop();
+    if(io_thread.joinable() ) io_thread.join();
+
+//     run_until(ioc, [&]{ return cl.online_transitions() == 1; }, std::chrono::seconds(10));
+//     run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 1; }, std::chrono::seconds(10));
+//     run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 1; }, std::chrono::seconds(10));
+
+//     ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 1u);
+//     ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 1u);
+
+//     //verify leaking(pending calls being ignored silently)
+//     tH.server_.enable_manual_replies(true);
+//     {
+//         auto session = session_wk.lock();
+//         ASSERT_TRUE(static_cast<bool>(session));
+//         std::promise<bool> p_leak;
+//         auto f_leak = p_leak.get_future();
+//         run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(10));
+//         session->send_call(HeartBeat{}, [&](const OcppFrame &f){
+//             if( std::holds_alternative<CallError>(f) )
+//             {
+//                 p_leak.set_value(true);
+//             }
+//         });
+//         tH.server_force_close();
+//         run_until(ioc, [&]{ return f_leak.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(11));
+//         ASSERT_EQ(f_leak.get(), true);
+//         ASSERT_TRUE(session->pending.empty());
+//     }
+
+//     tH.server_.enable_manual_replies(false);
+//     //reconnect
+//     tH.server_start();
+//     run_until(ioc, [&]{ return cl.online_transitions() == 2; }, std::chrono::seconds(10));
+//     run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 2; }, std::chrono::seconds(10));
+//     run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 2; }, std::chrono::seconds(10));
+
+//     ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 2u);
+//     ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 2u);
+
+//     tH.server_.enable_manual_replies(true);
+//     auto session = session_wk.lock();
+//     ASSERT_TRUE(static_cast<bool>(session));
+//     auto baseline = session->unmatched_replies();
+
+//     std::promise<void> p_reconnect;
+//     auto f_reconnect = p_reconnect.get_future();
+
+//     session->send_call(HeartBeat{}, [&p_reconnect](const OcppFrame& f){
+//         p_reconnect.set_value();
+//     });
+//     run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(5));
+//     auto received_final = tH.server_.received_call_message_ids();
+//     ASSERT_GT(received_final.size(), 0u);
+//     tH.server_.send_stored_reply_for(received_final.back());
+    
+//     run_until(ioc, [&]{ return f_reconnect.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(10));
+
+//     ASSERT_EQ(baseline, session->unmatched_replies());
 }

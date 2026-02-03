@@ -167,6 +167,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         ws_.async_handshake(host_, "/", [this,self](auto ec){
           if (ec) {
             std::cerr << "WebSocket handshake error: " << ec.message() << "\n";
+            metrics_.transport_on_close_event();
             on_closed_(); // notify close on handshake failure
             return;
           }
@@ -229,6 +230,9 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
       if (ec) {
         std::cerr << "Ws Client: Client WebSocket read error: " << ec.message() << "\n";
 
+        // Treat read failures as a close-type event for transport metrics.
+        metrics_.transport_on_close_event();
+
         if( (state_ != WsClientState::Disconnected) && on_closed_ ) {
           std::cout<<"Ws Client: callign on_closed_()"<<"\n";
           on_closed_();
@@ -268,6 +272,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         // writes_in_flight_++; 
         current_write_queue_depth_++;
         max_write_queue_depth_ = std::max(max_write_queue_depth_.load(), current_write_queue_depth_.load());
+        metrics_.transport_on_write_enqueued(static_cast<uint64_t>(current_write_queue_depth_.load()));
+
         // max_writes_in_flight_ = std::max(max_writes_in_flight_.load(), writes_in_flight_.load());
         if(!write_in_progress_) {
             do_write();
@@ -304,6 +310,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     auto &buf = *write_queue_.front();
     auto self = shared_from_this();
     writes_in_flight_++;
+    metrics_.transport_observe_writes_in_flight(static_cast<uint64_t>(writes_in_flight_.load()));
     ws_.async_write(boost::asio::buffer(buf), boost::asio::bind_executor(strand_,[this,self](auto ec, std::size_t len){
         if (ec) {
             std::cerr << "WebSocket write error: " << ec.message() << "\n";
@@ -311,6 +318,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         write_queue_.pop_front();
 
         writes_in_flight_--; current_write_queue_depth_--;
+      metrics_.transport_on_write_completed(static_cast<uint64_t>(current_write_queue_depth_.load()));
+      metrics_.transport_observe_writes_in_flight(static_cast<uint64_t>(writes_in_flight_.load()));
         max_writes_in_flight_ = std::max(max_writes_in_flight_.load(), writes_in_flight_.load());
 
         if( !write_queue_.empty()){
@@ -341,6 +350,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
     ws_.async_close(websocket::close_code::normal, [this,self](auto){
         state_ = WsClientState::Disconnected;
         std::cout << "WebSocket closed\n";
+        metrics_.transport_on_close_event();
         if( on_closed_ ) {
           on_closed_();
         }
@@ -374,14 +384,32 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
 
   // the following methods expose lightweight runtime metrics about the client's outbound write
   // pipeline. There purpose is for diagnostics, debugging and backpressure monitoring.
+  //
+
+  // transport_max_writes_in_flight()
+  // - Returns the maximum number of concurrent async_write operations observed at any time.
+  // - With correct write serialization on strand_, this should stay at 1 (or 0 if no writes
+  //   ever started).
   unsigned transport_max_writes_in_flight() const {
     return max_writes_in_flight_.load();
   }
 
+  // transport_max_write_queue_depth()
+  // - "queue depth" counts messages that have been enqueued via send() but not yet fully
+  //   completed; this includes the message currently being written (if any).
+  // - Returns the maximum observed write queue depth (see queue depth definition above).
+  // - A value > 0 indicates the producer (send()) got ahead of the socket writer at least
+  //   once, i.e., backpressure/queueing was observed under load.
   unsigned transport_max_write_queue_depth() const {
     return max_write_queue_depth_.load();
   }
 
+  // transport_current_write_queue_depth()
+  // - "max" values are the maximum observed since this WsClient was created / last reset
+  //   (there is currently no explicit reset API).
+  // - Returns the current write queue depth: number of enqueued outbound messages that have
+  //   not yet completed their write.
+  // - Under steady-state / after drains, this should return 0.
   unsigned transport_current_write_queue_depth() const {
     return current_write_queue_depth_.load();
   }
