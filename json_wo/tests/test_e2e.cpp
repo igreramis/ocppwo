@@ -628,13 +628,16 @@ TEST(E2E, BackPressureUpdatesTransportMetrics) {
         .url = ""
     };
 
+    std::weak_ptr<WsClient> client_wk;
     std::weak_ptr<Session> session_wk;
     Metrics *metrics = nullptr;
     ClientLoop::Factories f{
         .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
             
             metrics = &m;
-            return std::make_shared<WsClient>(ioc, host, port, m);
+            auto p = std::make_shared<WsClient>(ioc, host, port, m);
+            client_wk = p;
+            return p;
         },
         .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
             metrics = &m;
@@ -670,7 +673,48 @@ TEST(E2E, BackPressureUpdatesTransportMetrics) {
     }
     ASSERT_FALSE(boot_id.empty()) << "Client never sent BootNotification";
 
+    auto client = client_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(client));
+    int N = 1000;
+    for( int i = 0; i < N; i++ ) {
+        json frame = json::array({2, std::to_string(i), "Ping", json::object({{"seq", i }})});
+        client->send(frame.dump());
+    }
+
+    std::this_thread::sleep_for(5s);
+
+    auto snap = metrics->snapshot();
+
+    EXPECT_LE(snap.writes_in_flight_max_observed, 1u) << "Transprot allowed concurrent writes; must serialize writes.";
+
+    EXPECT_GT(snap.max_depth_observed, 0u) << "Never observed queue growth; test may not have stressed the writer.";
+
+    EXPECT_EQ(snap.current_write_queue_depth, 0u) << "Never observed current queue depth; test may not have stressed the writer.";
+
+    auto frames = tH.server_.received();
+    std::vector<int> seqs;
+
+    for( auto &frame : frames )
+    {
+        //how to convert string to json
+        auto a = json::parse(frame.text);
+        if( a.is_array() && a.size() > 3 && a[2] == "Ping" ) {
+            seqs.push_back(a[3].value("seq", -1));
+        }
+    }
+    ASSERT_EQ(seqs.size(), N) << "Server did not receive all Ping messages";
+
+    bool monotonic = false;
+    for( int i=1; i < seqs.size(); i++ ){
+        if( seqs[i] != seqs[i-1] + 1 ) {
+            monotonic = false;
+            break;
+        }
+    }
+    ASSERT_FALSE(monotonic) << "Ping messages received out of order";
+
     cl.stop();
+    // cl.force_stop();
     tH.server_.stop();
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();

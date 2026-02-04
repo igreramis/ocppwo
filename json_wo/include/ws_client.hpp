@@ -59,7 +59,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   std::atomic<unsigned> max_write_queue_depth_{0}, current_write_queue_depth_{0};
   enum class WsClientState {Disconnected, Connected, Connecting} state_{WsClientState::Disconnected};
   Metrics &metrics_;
-
+  bool close_pending_{false}, close_started_{false};
   WsClient(boost::asio::io_context& io, std::string host, std::string port, Metrics &metrics)
     : res_(io),
       ws_(io),
@@ -260,10 +260,13 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   // Threading / ordering:
   //   - All queue mutation happens on strand_ (via post(bind_executor(strand_, ...))).
   //   - Preserves FIFO ordering of writes: messages are written in the order enqueued.
-  void send(std::string text) override {
+  void send(std::string text) override {   
     auto buf = std::make_shared<std::string>(std::move(text));
     auto self = shared_from_this();
     boost::asio::post(boost::asio::bind_executor(strand_, [this, self, buf]() {
+        if( close_pending_ )
+          return;
+
         if( write_queue_.size() > 1000 ) {
             std::cerr << "Write queue overflow, dropping message\n";
             return;
@@ -302,7 +305,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
   void do_write(){
     //retreive buffer from ll(access and then remove)
     if( write_queue_.empty() ) {
-        write_in_progress_ = false;
+        write_in_progress_ = false;      
         return;
     }
     write_in_progress_ = true;
@@ -318,8 +321,8 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         write_queue_.pop_front();
 
         writes_in_flight_--; current_write_queue_depth_--;
-      metrics_.transport_on_write_completed(static_cast<uint64_t>(current_write_queue_depth_.load()));
-      metrics_.transport_observe_writes_in_flight(static_cast<uint64_t>(writes_in_flight_.load()));
+        metrics_.transport_on_write_completed(static_cast<uint64_t>(current_write_queue_depth_.load()));
+        metrics_.transport_observe_writes_in_flight(static_cast<uint64_t>(writes_in_flight_.load()));
         max_writes_in_flight_ = std::max(max_writes_in_flight_.load(), writes_in_flight_.load());
 
         if( !write_queue_.empty()){
@@ -327,34 +330,82 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
         }
         else {
             write_in_progress_ = false;
+            tentative_close(shared_from_this());
         }
     }));
   }
 
-   //   Initiate an orderly WebSocket close handshake.
+  // close()
+  //
+  // Purpose:
+  //   Request an orderly WebSocket close handshake.
+  //
+  // Key constraint (Boost.Beast):
+  //   ws_.async_close(...) must not overlap with an in-flight ws_.async_write(...).
+  //   Starting close while a write is outstanding can trigger a Beast soft_mutex assertion.
   //
   // Behavior:
-  //   - Calls ws_.async_close(normal, handler).
-  //   - On completion:
-  //     - Sets state_ = Disconnected
-  //     - Logs "WebSocket closed"
-  //     - Invokes on_closed_() if set.
+  //   - Posts onto strand_ and marks close_pending_ = true.
+  //   - Calls tentative_close(self) to attempt to start ws_.async_close.
+  //   - If the write pipeline is still busy, this call is non-blocking; close will be
+  //     attempted again when the write pipeline drains (see do_write() completion).
   //
   // Threading / ordering:
-  //   - Handler runs on the io_context associated with ws_.
-  //   - Not explicitly dispatched onto strand_. If io_context is multi-threaded, this
-  //     may run concurrently with other non-strand handlers unless the owning glue
-  //     serializes lifecycle events. 
+  //   - This method is safe to call from any thread: it funnels state changes onto strand_.
+  //   - The actual async_close initiation is gated by tentative_close() and serialized
+  //     with the write pipeline.
   void close() override {
+    
     auto self = shared_from_this();
-    ws_.async_close(websocket::close_code::normal, [this,self](auto){
-        state_ = WsClientState::Disconnected;
-        std::cout << "WebSocket closed\n";
-        metrics_.transport_on_close_event();
-        if( on_closed_ ) {
-          on_closed_();
-        }
-    });
+    
+    boost::asio::post(strand_, [this, self]{
+      close_pending_ = true;
+      tentative_close(self);        
+      });
+    
+    return;
+  }
+
+  // tentative_close(self)
+  //
+  // Purpose:
+  //   Internal helper for close(): attempts to initiate ws_.async_close(...) once the outbound
+  //   write pipeline is fully idle.
+  //
+  // Key constraint (Boost.Beast):
+  //   ws_.async_close(...) must not overlap with an in-flight ws_.async_write(...).
+  //   This method enforces that by gating close initiation on queue/in-flight state.
+  //
+  // Behavior:
+  //   - No-op unless close_pending_ is true and close_started_ is false.
+  //   - If write_queue_ is empty, write_in_progress_ is false, and writes_in_flight_ == 0:
+  //       - Sets close_started_ = true (idempotence)
+  //       - Starts ws_.async_close(normal, ...)
+  //       - On completion: marks Disconnected, updates metrics, and calls on_closed_() if set.
+  //   - Otherwise returns immediately (non-blocking). Callers re-invoke it when the pipeline drains.
+  //
+  // Threading / ordering:
+  //   - Intended to be invoked on strand_ (from close()'s posted handler and from the write completion
+  //     path when the queue becomes empty).
+  void tentative_close(std::shared_ptr<WsClient> self) {
+    if( close_pending_ && !close_started_ ) {
+      if( write_queue_.empty() && !write_in_progress_ && (writes_in_flight_.load() != 0))
+      {
+        close_started_ = true;
+        boost::asio::post(strand_, [this, self]{
+          self->ws_.async_close(websocket::close_code::normal,
+          boost::asio::bind_executor(self->strand_, [this, self](boost::system::error_code){
+            state_ = WsClientState::Disconnected;
+            std::cout << "WebSocket closed\n";
+            metrics_.transport_on_close_event();
+            if( on_closed_ ) {
+              on_closed_();
+            }        
+          }));
+          return;
+        });
+      }
+    }
   }
 
   // force_drop(graceful)
@@ -464,3 +515,7 @@ struct WsClient : Transport, std::enable_shared_from_this<WsClient> {
 };
 
 #endif // WS_CLIENT_HPP
+
+//todo
+//-see queued up packets at the transport layer are cleared if server closes connection
+//-determine argument for clearing these or not.
