@@ -269,6 +269,9 @@ struct Session {
         if (ec) return; // canceled = got reply
 
         CallError err{4, id, "Timeout", "Request timed out", json::object()};
+
+        metrics_.timeouts_total_increment();
+
         std::function<void(const OcppFrame &)> cb;
         {
           std::lock_guard<std::mutex> lock(pending_mtx);

@@ -31,9 +31,9 @@ struct MetricsSnapshot {
     uint64_t close_events_total = 0;
 
     //session
-    uint64_t pending_count_max_observed = 0;
-    uint64_t timeouts_count = 0;
-    uint64_t connection_closed_count = 0;
+    uint64_t pending_max = 0;
+    uint64_t timeouts_total = 0;
+    uint64_t connection_closed_failures_total = 0;
 
     //protocol
     uint64_t calls_sent = 0;
@@ -53,6 +53,8 @@ struct Metrics {
     void transport_on_write_completed(uint64_t depth_after_completion);
     void transport_observe_writes_in_flight(uint64_t writes_in_flight);
     void transport_on_close_event();
+
+    void timeouts_total_increment();
     private:
     std::atomic<uint64_t> current_write_queue_depth_{0};
     std::atomic<uint64_t> max_depth_observed_{0};
@@ -61,9 +63,9 @@ struct Metrics {
     std::atomic<uint64_t> writes_completed_total_{0};
     std::atomic<uint64_t> close_events_total_{0};
 
-    std::atomic<uint64_t> pending_count_max_observed_{0};
-    std::atomic<uint64_t> timeouts_count_{0};
-    std::atomic<uint64_t> connection_closed_count_{0};
+    std::atomic<uint64_t> pending_max_{0};
+    std::atomic<uint64_t> timeouts_total_{0};
+    std::atomic<uint64_t> connection_closed_failures_total_{0};
     std::atomic<uint64_t> calls_sent_{0};
     std::atomic<uint64_t> callresults_received_{0};
     std::atomic<uint64_t> callerrors_received_{0};

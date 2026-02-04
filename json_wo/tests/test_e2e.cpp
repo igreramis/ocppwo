@@ -557,9 +557,9 @@ TEST(Metrics, StartsAtZero) {
     ASSERT_EQ(m_snapshot.max_depth_observed, 0u);
     ASSERT_EQ(m_snapshot.writes_in_flight_max_observed, 0u);
 
-    ASSERT_EQ(m_snapshot.pending_count_max_observed, 0u);
-    ASSERT_EQ(m_snapshot.timeouts_count, 0u);
-    ASSERT_EQ(m_snapshot.connection_closed_count, 0u);
+    ASSERT_EQ(m_snapshot.pending_max, 0u);
+    ASSERT_EQ(m_snapshot.timeouts_total, 0u);
+    ASSERT_EQ(m_snapshot.connection_closed_failures_total, 0u);
 
     ASSERT_EQ(m_snapshot.calls_sent, 0u);
     ASSERT_EQ(m_snapshot.callresults_received, 0u);
@@ -610,7 +610,6 @@ TEST(Metrics, CanReadMetricsFromClientLoop) {
     auto snap = cl.metrics().snapshot();
     ASSERT_EQ(snap.online_transitions, 0u);
 }
-#endif
 
 TEST(E2E, BackPressureUpdatesTransportMetrics) {
     boost::asio::io_context ioc;
@@ -718,61 +717,61 @@ TEST(E2E, BackPressureUpdatesTransportMetrics) {
     tH.server_.stop();
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();
+}
+#endif
 
-//     run_until(ioc, [&]{ return cl.online_transitions() == 1; }, std::chrono::seconds(10));
-//     run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 1; }, std::chrono::seconds(10));
-//     run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 1; }, std::chrono::seconds(10));
+TEST(E2E, TimeoutIncrementsTimeoutMetric) {
+    boost::asio::io_context ioc;
 
-//     ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 1u);
-//     ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 1u);
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
 
-//     //verify leaking(pending calls being ignored silently)
-//     tH.server_.enable_manual_replies(true);
-//     {
-//         auto session = session_wk.lock();
-//         ASSERT_TRUE(static_cast<bool>(session));
-//         std::promise<bool> p_leak;
-//         auto f_leak = p_leak.get_future();
-//         run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(10));
-//         session->send_call(HeartBeat{}, [&](const OcppFrame &f){
-//             if( std::holds_alternative<CallError>(f) )
-//             {
-//                 p_leak.set_value(true);
-//             }
-//         });
-//         tH.server_force_close();
-//         run_until(ioc, [&]{ return f_leak.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(11));
-//         ASSERT_EQ(f_leak.get(), true);
-//         ASSERT_TRUE(session->pending.empty());
-//     }
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
 
-//     tH.server_.enable_manual_replies(false);
-//     //reconnect
-//     tH.server_start();
-//     run_until(ioc, [&]{ return cl.online_transitions() == 2; }, std::chrono::seconds(10));
-//     run_until(ioc, [&]{ return event_count(TestServer::EventType::BootAccepted) == 2; }, std::chrono::seconds(10));
-//     run_until(ioc, [&]{ return event_count(TestServer::EventType::FirstHeartBeat) == 2; }, std::chrono::seconds(10));
+    std::weak_ptr<WsClient> client_wk;
+    std::weak_ptr<Session> session_wk;
+    Metrics *metrics = nullptr;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            auto p = std::make_shared<WsClient>(ioc, host, port, m);
+            client_wk = p;
+            return p;
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            auto p = std::make_shared<Session>(ioc, transport, sigs, m);
+            session_wk = p;
+            return p;
+        }
+    };
 
-//     ASSERT_EQ(event_count(TestServer::EventType::FirstHeartBeat), 2u);
-//     ASSERT_EQ(event_count(TestServer::EventType::BootAccepted), 2u);
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_.set_boot_conf("BootMessage", 3);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
 
-//     tH.server_.enable_manual_replies(true);
-//     auto session = session_wk.lock();
-//     ASSERT_TRUE(static_cast<bool>(session));
-//     auto baseline = session->unmatched_replies();
+    run_until(ioc, [&]{ return (cl.online_transitions() ==  1) ; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1u);
 
-//     std::promise<void> p_reconnect;
-//     auto f_reconnect = p_reconnect.get_future();
+    tH.server_.enable_manual_replies(true);
+    auto session = session_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(session));
+    session->send_call(HeartBeat{}, [](const OcppFrame& f){
+        //no-op; we expect this to timeout
+    }, std::chrono::seconds(2));
+    run_until(ioc, [&] { return (metrics->snapshot().timeouts_total == 1u); }, std::chrono::seconds(4));
+    ASSERT_EQ(metrics->snapshot().timeouts_total, 1u);
 
-//     session->send_call(HeartBeat{}, [&p_reconnect](const OcppFrame& f){
-//         p_reconnect.set_value();
-//     });
-//     run_until(ioc, [&]{ return !tH.server_.received_call_message_ids().empty();}, std::chrono::seconds(5));
-//     auto received_final = tH.server_.received_call_message_ids();
-//     ASSERT_GT(received_final.size(), 0u);
-//     tH.server_.send_stored_reply_for(received_final.back());
-    
-//     run_until(ioc, [&]{ return f_reconnect.wait_for(std::chrono::seconds(0)) == std::future_status::ready;}, std::chrono::seconds(10));
-
-//     ASSERT_EQ(baseline, session->unmatched_replies());
+    cl.stop();
+    tH.server_force_close();
 }
