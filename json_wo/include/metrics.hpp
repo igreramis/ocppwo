@@ -6,15 +6,18 @@ struct MetricsSnapshot {
     //transport
     // Gauge: number of outbound messages currently outstanding (enqueued but not yet fully
     // completed). This typically includes the message currently being written (if any).
+    // 1:1 with WsClient's probe gauge: current_write_queue_depth_.
     uint64_t current_write_queue_depth = 0;
 
     // Gauge (max-so-far): the highest observed value of current_write_queue_depth since start.
     // Useful as a backpressure/queueing peak indicator.
+    // Conceptually 1:1 with WsClient's probe max: max_write_queue_depth_.
     uint64_t max_depth_observed = 0;
 
     // Gauge (max-so-far): maximum number of concurrent writes observed "in flight" at once
     // (async write started, completion handler not yet run). With correct serialization,
     // this should usually be <= 1.
+    // 1:1 with WsClient's probe max: max_writes_in_flight_.
     uint64_t writes_in_flight_max_observed = 0;
 
     // Counter: total number of outbound writes/messages enqueued for sending. Monotonic.
