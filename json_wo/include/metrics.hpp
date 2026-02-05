@@ -41,9 +41,23 @@ struct MetricsSnapshot {
     uint64_t callerrors_received = 0;
 
     //reconnect
-    uint64_t connect_attempts = 0;
-    uint64_t reconnect_attempts = 0;
-    uint64_t online_transitions = 0;
+    // Counter: every connect attempt started by the reconnect loop.
+    uint64_t connect_attempts_total = 0;
+
+    // Counter: connect attempts that reached a successful connection.
+    uint64_t successful_connects_total = 0;
+
+    // Counter: reconnect attempts caused by close/failure.
+    uint64_t reconnect_attempts_total = 0;
+
+    // Counter: number of transitions into the "online" state.
+    uint64_t online_transitions_total = 0;
+
+    // Gauge: last backoff delay scheduled by the reconnect loop (milliseconds).
+    uint64_t last_backoff_ms = 0;
+
+    // Gauge: last observed time from connect attempt start -> online transition (milliseconds).
+    uint64_t time_to_online_last_ms = 0;
 };
 
 struct Metrics {
@@ -57,6 +71,14 @@ struct Metrics {
     void timeouts_total_increment();
     void connection_closed_failures_total_increment();
     void connection_closed_failures_total_add(uint64_t n);
+
+    void reconnect_connect_attempts_total_increment();
+    void reconnect_successful_connects_total_increment();
+    void reconnect_reconnect_attempts_total_increment();
+    void reconnect_online_transitions_total_increment();
+    void reconnect_set_last_backoff_ms(uint64_t ms);
+    void reconnect_set_time_to_online_last_ms(uint64_t ms);
+
 
     private:
     std::atomic<uint64_t> current_write_queue_depth_{0};
@@ -72,7 +94,11 @@ struct Metrics {
     std::atomic<uint64_t> calls_sent_{0};
     std::atomic<uint64_t> callresults_received_{0};
     std::atomic<uint64_t> callerrors_received_{0};
-    std::atomic<uint64_t> connect_attempts_{0};
-    std::atomic<uint64_t> reconnect_attempts_{0};
-    std::atomic<uint64_t> online_transitions_{0};
+    //reconnect
+    std::atomic<uint64_t> connect_attempts_total_{0};
+    std::atomic<uint64_t> successful_connects_total_{0};
+    std::atomic<uint64_t> reconnect_attempts_total_{0};
+    std::atomic<uint64_t> online_transitions_total_{0};
+    std::atomic<uint64_t> last_backoff_ms_{0};
+    std::atomic<uint64_t> time_to_online_last_ms_{0};
 };

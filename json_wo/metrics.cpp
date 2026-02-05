@@ -13,9 +13,12 @@ MetricsSnapshot Metrics::snapshot() const {
         .calls_sent = calls_sent_.load(std::memory_order_relaxed),
         .callresults_received = callresults_received_.load(std::memory_order_relaxed),
         .callerrors_received = callerrors_received_.load(std::memory_order_relaxed),
-        .connect_attempts = connect_attempts_.load(std::memory_order_relaxed),
-        .reconnect_attempts = reconnect_attempts_.load(std::memory_order_relaxed),
-        .online_transitions = online_transitions_.load(std::memory_order_relaxed)
+        .connect_attempts_total = connect_attempts_total_.load(std::memory_order_relaxed),
+        .successful_connects_total = successful_connects_total_.load(std::memory_order_relaxed),
+        .reconnect_attempts_total = reconnect_attempts_total_.load(std::memory_order_relaxed),
+        .online_transitions_total = online_transitions_total_.load(std::memory_order_relaxed),
+        .last_backoff_ms = last_backoff_ms_.load(std::memory_order_relaxed),
+        .time_to_online_last_ms = time_to_online_last_ms_.load(std::memory_order_relaxed)
     };
 }
 
@@ -56,4 +59,28 @@ void Metrics::timeouts_total_increment() {
 
 void Metrics::connection_closed_failures_total_increment() {
     connection_closed_failures_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_connect_attempts_total_increment() {
+    connect_attempts_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_successful_connects_total_increment() {
+    successful_connects_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_reconnect_attempts_total_increment() {
+    reconnect_attempts_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_online_transitions_total_increment() {
+    online_transitions_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_set_last_backoff_ms(uint64_t ms) {
+    last_backoff_ms_.store(ms, std::memory_order_relaxed);
+}
+
+void Metrics::reconnect_set_time_to_online_last_ms(uint64_t ms) {
+    time_to_online_last_ms_.store(ms, std::memory_order_relaxed);
 }

@@ -565,9 +565,10 @@ TEST(Metrics, StartsAtZero) {
     ASSERT_EQ(m_snapshot.callresults_received, 0u);
     ASSERT_EQ(m_snapshot.callerrors_received, 0u);
 
-    ASSERT_EQ(m_snapshot.connect_attempts, 0u);
-    ASSERT_EQ(m_snapshot.reconnect_attempts, 0u);
-    ASSERT_EQ(m_snapshot.online_transitions, 0u);
+    ASSERT_EQ(m_snapshot.connect_attempts_total, 0u);
+    ASSERT_EQ(m_snapshot.reconnect_attempts_total, 0u);
+    ASSERT_EQ(m_snapshot.online_transitions_total, 0u);
+    ASSERT_EQ(m_snapshot.time_to_online_last_ms, 0u);
 }
 
 TEST(Metrics, CanReadMetricsFromClientLoop) {
@@ -608,7 +609,7 @@ TEST(Metrics, CanReadMetricsFromClientLoop) {
     ASSERT_NE(metrics, nullptr);
 
     auto snap = cl.metrics().snapshot();
-    ASSERT_EQ(snap.online_transitions, 0u);
+    ASSERT_EQ(snap.online_transitions_total, 0u);
 }
 
 TEST(E2E, BackPressureUpdatesTransportMetrics) {
