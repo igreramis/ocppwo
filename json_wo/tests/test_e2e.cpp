@@ -718,7 +718,6 @@ TEST(E2E, BackPressureUpdatesTransportMetrics) {
     ioc.stop();
     if(io_thread.joinable() ) io_thread.join();
 }
-#endif
 
 TEST(E2E, TimeoutIncrementsTimeoutMetric) {
     boost::asio::io_context ioc;
@@ -774,4 +773,66 @@ TEST(E2E, TimeoutIncrementsTimeoutMetric) {
 
     cl.stop();
     tH.server_force_close();
+}
+#endif
+
+TEST(E2E, ServerCloseIncrementsConnectionClosedMetric) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<WsClient> client_wk;
+    std::weak_ptr<Session> session_wk;
+    Metrics *metrics = nullptr;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            auto p = std::make_shared<WsClient>(ioc, host, port, m);
+            client_wk = p;
+            return p;
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            auto p = std::make_shared<Session>(ioc, transport, sigs, m);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_.set_boot_conf("BootMessage", 30);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+    cl.start();
+
+    run_until(ioc, [&]{ return (cl.online_transitions() ==  1) ; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1u);
+
+    tH.server_.enable_manual_replies(true);
+    auto session = session_wk.lock();
+    ASSERT_TRUE(static_cast<bool>(session));
+
+    constexpr int N = 5;
+    for( int i = 0; i < N; i++) {
+        session->send_call(HeartBeat{}, [](const OcppFrame& f){
+            //no-op; we expect this to timeout
+        }, std::chrono::seconds(30));
+    }
+    
+    tH.server_force_close();
+    
+    run_until(ioc, [&] { return (session->pending.empty()); }, std::chrono::seconds(10));
+
+    ASSERT_EQ(metrics->snapshot().connection_closed_failures_total, N);
 }

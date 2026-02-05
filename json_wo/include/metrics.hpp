@@ -55,6 +55,9 @@ struct Metrics {
     void transport_on_close_event();
 
     void timeouts_total_increment();
+    void connection_closed_failures_total_increment();
+    void connection_closed_failures_total_add(uint64_t n);
+
     private:
     std::atomic<uint64_t> current_write_queue_depth_{0};
     std::atomic<uint64_t> max_depth_observed_{0};

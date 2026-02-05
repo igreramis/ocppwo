@@ -444,7 +444,11 @@ struct Session {
       CallError err{4, v.first, "ConnectionClosed", "Connection closed before reply", json::object()};
       if (v.second)
         v.second(OcppFrame{err});
+      metrics_.connection_closed_failures_total_increment();
     }
+    // if( to_close.size() > 0 ) {
+    //   metrics_.connection_closed_failures_total_increment();
+    // }
   }
 
   //   Inbound lifecycle hook from the transport/reconnect layer indicating the underlying
