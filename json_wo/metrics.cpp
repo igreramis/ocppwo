@@ -7,9 +7,9 @@ MetricsSnapshot Metrics::snapshot() const {
         .writes_in_flight_max_observed = writes_in_flight_max_observed_.load(std::memory_order_relaxed),
         .writes_enqueued_total = writes_enqueued_total_.load(std::memory_order_relaxed),
         .writes_completed_total = writes_completed_total_.load(std::memory_order_relaxed),
-        .pending_count_max_observed = pending_count_max_observed_.load(std::memory_order_relaxed),
-        .timeouts_count = timeouts_count_.load(std::memory_order_relaxed),
-        .connection_closed_count = connection_closed_count_.load(std::memory_order_relaxed),
+        .pending_max = pending_max_.load(std::memory_order_relaxed),
+        .timeouts_total = timeouts_total_.load(std::memory_order_relaxed),
+        .connection_closed_failures_total = connection_closed_failures_total_.load(std::memory_order_relaxed),
         .calls_sent = calls_sent_.load(std::memory_order_relaxed),
         .callresults_received = callresults_received_.load(std::memory_order_relaxed),
         .callerrors_received = callerrors_received_.load(std::memory_order_relaxed),
@@ -48,4 +48,12 @@ void Metrics::transport_observe_writes_in_flight(uint64_t writes_in_flight) {
 
 void Metrics::transport_on_close_event() {
     close_events_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::timeouts_total_increment() {
+    timeouts_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::connection_closed_failures_total_increment() {
+    connection_closed_failures_total_.fetch_add(1, std::memory_order_relaxed);
 }
