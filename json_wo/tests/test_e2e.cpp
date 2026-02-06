@@ -775,7 +775,6 @@ TEST(E2E, TimeoutIncrementsTimeoutMetric) {
     cl.stop();
     tH.server_force_close();
 }
-#endif
 
 TEST(E2E, ServerCloseIncrementsConnectionClosedMetric) {
     boost::asio::io_context ioc;
@@ -836,4 +835,70 @@ TEST(E2E, ServerCloseIncrementsConnectionClosedMetric) {
     run_until(ioc, [&] { return (session->pending.empty()); }, std::chrono::seconds(10));
 
     ASSERT_EQ(metrics->snapshot().connection_closed_failures_total, N);
+}
+#endif
+
+TEST(E2E, ForcedCloseIncrementsReconnectAttempt) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<WsClient> client_wk;
+    std::weak_ptr<Session> session_wk;
+    Metrics *metrics = nullptr;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            auto p = std::make_shared<WsClient>(ioc, host, port, m);
+            client_wk = p;
+            return p;
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            auto p = std::make_shared<Session>(ioc, transport, sigs, m);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    
+    TestHarness tH(ioc, "127.0.0.1", port);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+
+    
+    cl.start();
+
+    run_until(ioc, [&]{ return (cl.online_transitions() ==  1) ; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1u);
+    
+    ASSERT_EQ(metrics->snapshot().reconnect_attempts_total, 0u);
+    ASSERT_GT(metrics->snapshot().time_to_online_last_ms, 0u);
+    tH.server_force_close();
+
+    run_until(ioc, [&]{ return (cl.state() == ClientLoop::State::Offline); }, std::chrono::seconds(10));
+
+    tH.server_start();
+
+    run_until(ioc, [&]{ return (cl.online_transitions() ==  2) ; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 2u);
+
+    tH.server_force_close();
+    run_until(ioc, [&]{ return (cl.state() == ClientLoop::State::Offline); }, std::chrono::seconds(10));
+
+    ASSERT_EQ(metrics->snapshot().connect_attempts_total, 2u);
+    ASSERT_GE(metrics->snapshot().reconnect_attempts_total, 1u);
+
 }

@@ -50,6 +50,9 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
     std::atomic<uint64_t> next_token{1};
     std::mutex timers_mtx;
     std::unordered_map<uint64_t, std::shared_ptr<boost::asio::steady_timer>> timers;
+    int time_to_boot_ms_{0};
+    std::optional<std::chrono::steady_clock::time_point> connect_start_time_;
+    bool ever_connected_{false};
 
     // Close completion hook for TransportOps::async_close
     // std::mutex close_mtx;
@@ -67,6 +70,24 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
         // transport.reset();
     }
 
+    // ---------------------------------------------------------------------
+    // make_transport_ops()
+    //
+    // Purpose:
+    //   Build the TransportOps table that adapts the concrete transport (WsClient)
+    //   and timer facilities (steady_timer) into the abstract operations expected
+    //   by ReconnectController.
+    //
+    // Who uses it:
+    //   - ReconnectController calls these callbacks to connect/close and schedule
+    //     backoff/resume timers.
+    //
+    // What it wires:
+    //   - async_connect: creates WsClient, wires on_connected/on_message/on_close,
+    //     and calls the completion callback with ok=true/false.
+    //   - async_close: requests transport close and completes once the close is observed.
+    //   - post_after/cancel_after: tokenized timer scheduling used for backoff.
+    //   - now(): time source for reconnect timing/metrics.
     TransportOps make_transport_ops() {
         //get a weak ptr to this so that we can use it in the lambdas without forcing shared ownership
         std::weak_ptr<Impl> wk = weak_from_this();
@@ -191,6 +212,19 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
         return tOps;
     }
 
+    // ---------------------------------------------------------------------
+    // wire_signals()
+    //
+    // Purpose:
+    //   Attach observers (ReconnectSignals + SessionSignals) that translate low-level
+    //   reconnect/transport/session events into higher-level actions for ClientLoop:
+    //   - update ClientLoop::State (Offline/Connecting/Online)
+    //   - notify ReconnectController when Boot is accepted
+    //   - start session behavior once online (e.g., heartbeats)
+    //   - update reconnect-related Metrics counters/gauges
+    //
+    // Notes:
+    //   - These handlers are callbacks; they run on the io_context thread when invoked.
     void wire_signals() {
         std::weak_ptr<Impl> wk = weak_from_this();
 
@@ -198,8 +232,21 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
             ;;//something here...
             if( auto self = wk.lock() )
             {
-                self->online_transitions_.fetch_add(1, std::memory_order_relaxed);
-                self->set_state(State::Online);
+                // self->online_transitions_.fetch_add(1, std::memory_order_relaxed);
+                // self->metrics_.reconnect_online_transitions_total_increment();
+                // if( self->connect_start_time_)
+                // {
+                //     auto time_to_online = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - *self->connect_start_time_).count();
+                //     std::cout<<"Here..."<<std::endl;
+                //     if( time_to_online >= 0)
+                //     {
+                //         std::cout<<"Setting time..."<<std::endl;
+                //         self->metrics_.reconnect_set_time_to_online_last_ms(time_to_online);
+                //     }
+                //     self->connect_start_time_.reset();
+                // }
+
+                // self->set_state(State::Online);
                 self->rc->on_boot_accepted();
             }
         };
@@ -207,13 +254,21 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
         sigs->on_connecting = [wk] {
             if( auto self = wk.lock() ) {
                 self->set_state(State::Connecting);
+                self->metrics_.reconnect_connect_attempts_total_increment();
+                if( self->ever_connected_ )
+                {
+                    self->metrics_.reconnect_reconnect_attempts_total_increment();
+                }
+                self->connect_start_time_ = std::chrono::steady_clock::now();
             }
         };
 
         sigs->on_connected = [wk] {
             if (auto self = wk.lock()) {
                 self->set_state(State::Connecting);
+                self->ever_connected_ = true;
                 self->session->on_transport_connected();
+                self->metrics_.reconnect_successful_connects_total_increment();
             }
         };
 
@@ -221,6 +276,19 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
             if( auto self = wk.lock()) {
                 self->set_state(State::Online);
                 self->session->start_heartbeat();
+                self->online_transitions_.fetch_add(1, std::memory_order_relaxed);
+                self->metrics_.reconnect_online_transitions_total_increment();
+                if( self->connect_start_time_)
+                {
+                    auto time_to_online = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - *self->connect_start_time_).count();
+                    std::cout<<"Here..."<<std::endl;
+                    if( time_to_online >= 0)
+                    {
+                        std::cout<<"Setting time..."<<std::endl;
+                        self->metrics_.reconnect_set_time_to_online_last_ms(time_to_online);
+                    }
+                    self->connect_start_time_.reset();
+                }
             }
         };
 
@@ -236,6 +304,8 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
             std::cout<<"backoff scheduled for "<<delay.count()<<" ms\n";
             if( auto self = wk.lock() )
             {
+                self->metrics_.reconnect_set_last_backoff_ms(delay.count());
+
                 if( self->cfg.on_backoff_scheduled  )
                 {
                     self->cfg.on_backoff_scheduled(delay);

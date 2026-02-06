@@ -23,12 +23,37 @@ enum class CloseReason { Clean, TransportError, ProtocolError };
 // - External actors assign these std::function callbacks (observers).
 // - ReconnectController invokes them to report its own state transitions.
 struct ReconnectSignals {
-  std::function<void()> on_connecting;
-  std::function<void()> on_connected;
-  std::function<void(CloseReason)> on_closed;
-  std::function<void()> on_online;
-  std::function<void()> on_offline;
-  std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;// Notifies observers when a backoff delay is computed and scheduled. Receives the delay (ms). Called after compute_backoff_ and posting the timer; handler should be quick/non‑blocking.
+    // on_connecting:
+    //   Emitted when the controller STARTS a connection attempt.
+    //   This is the earliest signal: DNS/TCP/WS handshake may still fail after this.
+    //   If the attempt fails, you may see: on_connecting -> on_backoff_scheduled -> on_connecting ...
+    std::function<void()> on_connecting;
+
+    // on_connected:
+    //   Emitted when the transport is established (handshake complete).
+    //   At this point the socket/WS is up and frames can flow, but the system may NOT be
+    //   logically "online" yet (e.g., BootNotification not accepted).
+    std::function<void()> on_connected;
+
+    // on_closed:
+    //   Emitted when an established transport closes (cleanly or due to error).
+    //   This is a transport-level loss notification (not a protocol/boot outcome).
+    //   Typical sequence on drop: on_connected -> on_closed(reason) -> on_offline -> on_backoff_scheduled(...)
+    std::function<void(CloseReason)> on_closed;
+
+    // on_online:
+    //   Emitted when the system becomes logically online (BootAccepted observed, plus optional resume_delay).
+    //   This is higher-level readiness than on_connected.
+    std::function<void()> on_online;
+
+    // on_offline:
+    //   Emitted when the system is considered offline (typically immediately after on_closed).
+    std::function<void()> on_offline;
+
+    // on_backoff_scheduled:
+    //   Emitted when a retry delay has been computed and scheduled. Receives delay in ms.
+    //   Called right after computing backoff and before/when posting the timer; keep handlers quick.
+    std::function<void(std::chrono::milliseconds)> on_backoff_scheduled;
 };
 
 // TransportOps — inbound operations/events into ReconnectController
