@@ -5,6 +5,7 @@
 #include "session.hpp"
 #include "test_harness.hpp"
 #include "metrics.hpp"
+#include "metrics_logger.hpp"
 
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
@@ -836,7 +837,6 @@ TEST(E2E, ServerCloseIncrementsConnectionClosedMetric) {
 
     ASSERT_EQ(metrics->snapshot().connection_closed_failures_total, N);
 }
-#endif
 
 TEST(E2E, ForcedCloseIncrementsReconnectAttempt) {
     boost::asio::io_context ioc;
@@ -901,4 +901,106 @@ TEST(E2E, ForcedCloseIncrementsReconnectAttempt) {
     ASSERT_EQ(metrics->snapshot().connect_attempts_total, 2u);
     ASSERT_GE(metrics->snapshot().reconnect_attempts_total, 1u);
 
+}
+
+
+TEST(Metrics, LogFormatContainsKeyFields) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<WsClient> client_wk;
+    std::weak_ptr<Session> session_wk;
+
+    Metrics metrics;
+    MetricsLogger logger;
+    auto snap = metrics.snapshot();
+    std::ostringstream oss;
+    logger.log_metrics(snap, oss);
+    const std::string out = oss.str();
+    std::cout<<"out: "<<out<<std::endl;
+    ASSERT_NE(out.find("protocol.callerrors_received="), std::string::npos);
+    ASSERT_NE(out.find("protocol.callresults_received="), std::string::npos);
+    ASSERT_NE(out.find("protocol.calls_sent="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.connect_attempts_total="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.last_backoff_ms="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.online_transitions_total="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.reconnect_attempts_total="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.successful_connects_total="), std::string::npos);
+    ASSERT_NE(out.find("reconnect.time_to_online_last_ms="), std::string::npos);
+    ASSERT_NE(out.find("session.connection_closed_failures_total="), std::string::npos);
+    ASSERT_NE(out.find("session.pending_max="), std::string::npos);
+    ASSERT_NE(out.find("session.timeouts_total="), std::string::npos);
+    ASSERT_NE(out.find("transport.close_events_total="), std::string::npos);
+    ASSERT_NE(out.find("transport.current_write_queue_depth="), std::string::npos);
+    ASSERT_NE(out.find("transport.max_depth_observed="), std::string::npos);
+    ASSERT_NE(out.find("transport.writes_completed_total="), std::string::npos);
+    ASSERT_NE(out.find("transport.writes_enqueued_total="), std::string::npos);
+    ASSERT_NE(out.find("transport.writes_in_flight_max_observed="), std::string::npos);
+}
+#endif
+
+TEST(E2E, ServerMetricsMatchTraffic) {
+    boost::asio::io_context ioc;
+
+    //Pick an ephemeral port
+    unsigned short port = 0;
+    {
+        tcp::acceptor tmp(ioc, {tcp::v4(), 0});
+        port = tmp.local_endpoint().port();
+    }
+
+    std::vector<int> recorded_backoffs;
+    ClientLoop::Config cfg{
+        .host = "127.0.0.1",
+        .port = port,
+        .url = "",
+    };
+
+    std::weak_ptr<WsClient> client_wk;
+    std::weak_ptr<Session> session_wk;
+    Metrics *metrics = nullptr;
+    ClientLoop::Factories f{
+        .make_transport = [&](boost::asio::io_context& ioc, std::string host, std::string port, Metrics& m)->std::shared_ptr<WsClient>{
+            
+            metrics = &m;
+            auto p = std::make_shared<WsClient>(ioc, host, port, m);
+            client_wk = p;
+            return p;
+        },
+        .make_session = [&](boost::asio::io_context& ioc, std::shared_ptr<Transport> transport, std::shared_ptr<SessionSignals> sigs, Metrics& m) -> std::shared_ptr<Session> {
+            metrics = &m;
+            auto p = std::make_shared<Session>(ioc, transport, sigs, m);
+            session_wk = p;
+            return p;
+        }
+    };
+
+    Metrics metrics_server;
+    TestHarness tH(ioc, "127.0.0.1", port, metrics_server);tH.server_start();
+    ClientLoop cl(ioc, cfg, f);
+
+    
+    cl.start();
+
+    run_until(ioc, [&]{ return (cl.online_transitions() ==  1) ; }, std::chrono::seconds(10));
+    ASSERT_EQ(cl.online_transitions(), 1u);
+    
+    run_until(ioc, [&]{ return (tH.server_.heartbeats().size() ==  3) ; }, std::chrono::seconds(15));
+    ASSERT_EQ(tH.server_.heartbeats().size(), 3u);
+
+    ASSERT_GE(metrics_server.snapshot().server_calls_received_total, 4u);
+    ASSERT_GE(metrics_server.snapshot().server_replies_sent_total, 4u);
 }

@@ -11,6 +11,7 @@
 #include <chrono>
 #include "ws_server_session.hpp"
 #include "router.hpp"
+#include "metrics.hpp"
 
 namespace beast  = boost::beast;
 namespace http = beast::http;
@@ -45,7 +46,7 @@ class TestServer {
         };
 
 
-        TestServer(asio::io_context& ioc, unsigned short port);
+        TestServer(asio::io_context& ioc, unsigned short port, Metrics &metrics);
 
     // ---------------------------------------------------------------------
     // Lifecycle: start()
@@ -304,6 +305,7 @@ class TestServer {
         //     otherwise replies are auto-sent and nothing is stored.
         bool send_stored_reply_for(const std::string& message_id);
         private:
+        Metrics &metrics_;
         std::function<void()> do_accept;
         struct StoredReply {
             std::string message_id;

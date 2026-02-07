@@ -1,7 +1,7 @@
 #include "test_server.hpp"
 
-TestServer::TestServer(asio::io_context& ioc, unsigned short port):
-    ioc_(ioc), port_(port), ws_(ioc), acc_(ioc, tcp::endpoint(tcp::v4(), port)){
+TestServer::TestServer(asio::io_context& ioc, unsigned short port, Metrics &metrics):
+    ioc_(ioc), port_(port), ws_(ioc), acc_(ioc, tcp::endpoint(tcp::v4(), port)), metrics_(metrics){
     // router_.addHandler<BootNotification>(BootNotificationHandler);
     router_.addHandler<BootNotification>([this](const BootNotification& p, const std::string& s){
         return this->TestBootNotificationHandler(p, s);
@@ -59,10 +59,12 @@ void TestServer::start(){
                     {
                         std::lock_guard<std::mutex> lock(mtx_);
                         received_.push_back(Frame{std::string(msg), now});
+                        metrics_.server_frames_received_total_increment();
                         json j = json::parse(std::string(msg));
                         OcppFrame f = parse_frame(j);
                         if( std::holds_alternative<Call>(f) ) {
                             Call c = std::get<Call>(f);
+                            metrics_.server_calls_received_total_increment();
                             if( c.action == "HeartBeat" ) {
                                 heartbeats_.push_back(Frame{std::string(msg), now});
                                 if( heartbeats_.size() == 1 ) {
@@ -92,6 +94,7 @@ void TestServer::start(){
                         if(!manual)
                         {
                             ss->send(reply);
+                            metrics_.server_replies_sent_total_increment();
                             return;
                         }
                         try {
@@ -247,6 +250,7 @@ bool TestServer::send_stored_reply_for(const std::string& message_id) {
         stored_replies_.erase(it);
     }
     s->send(r.reply_text);
+    metrics_.server_replies_sent_total_increment();
     return true;
 }
 

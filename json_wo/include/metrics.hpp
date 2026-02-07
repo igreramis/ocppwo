@@ -58,6 +58,19 @@ struct MetricsSnapshot {
 
     // Gauge: last observed time from connect attempt start -> online transition (milliseconds).
     uint64_t time_to_online_last_ms = 0;
+
+    //server
+    // Counter: total websocket/transport frames received by the server.
+    uint64_t server_frames_received_total = 0;
+
+    // Counter: total OCPP CALL messages received by the server.
+    uint64_t server_calls_received_total = 0;
+
+    // Counter: total replies sent by the server (CALLRESULT + CALLERROR).
+    uint64_t server_replies_sent_total = 0;
+
+    // Counter: total times the server force-closed a connection (test hook).
+    uint64_t server_force_closes_total = 0;
 };
 
 struct Metrics {
@@ -78,6 +91,11 @@ struct Metrics {
     void reconnect_online_transitions_total_increment();
     void reconnect_set_last_backoff_ms(uint64_t ms);
     void reconnect_set_time_to_online_last_ms(uint64_t ms);
+
+    void server_frames_received_total_increment();
+    void server_calls_received_total_increment();
+    void server_replies_sent_total_increment();
+    void server_force_closes_total_increment();
 
 
     private:
@@ -101,4 +119,10 @@ struct Metrics {
     std::atomic<uint64_t> online_transitions_total_{0};
     std::atomic<uint64_t> last_backoff_ms_{0};
     std::atomic<uint64_t> time_to_online_last_ms_{0};
+
+    //server
+    std::atomic<uint64_t> server_frames_received_total_{0};
+    std::atomic<uint64_t> server_calls_received_total_{0};
+    std::atomic<uint64_t> server_replies_sent_total_{0};
+    std::atomic<uint64_t> server_force_closes_total_{0};
 };

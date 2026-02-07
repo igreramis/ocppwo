@@ -18,7 +18,12 @@ MetricsSnapshot Metrics::snapshot() const {
         .reconnect_attempts_total = reconnect_attempts_total_.load(std::memory_order_relaxed),
         .online_transitions_total = online_transitions_total_.load(std::memory_order_relaxed),
         .last_backoff_ms = last_backoff_ms_.load(std::memory_order_relaxed),
-        .time_to_online_last_ms = time_to_online_last_ms_.load(std::memory_order_relaxed)
+        .time_to_online_last_ms = time_to_online_last_ms_.load(std::memory_order_relaxed),
+
+        .server_frames_received_total = server_frames_received_total_.load(std::memory_order_relaxed),
+        .server_calls_received_total = server_calls_received_total_.load(std::memory_order_relaxed),
+        .server_replies_sent_total = server_replies_sent_total_.load(std::memory_order_relaxed),
+        .server_force_closes_total = server_force_closes_total_.load(std::memory_order_relaxed)
     };
 }
 
@@ -83,4 +88,20 @@ void Metrics::reconnect_set_last_backoff_ms(uint64_t ms) {
 
 void Metrics::reconnect_set_time_to_online_last_ms(uint64_t ms) {
     time_to_online_last_ms_.store(ms, std::memory_order_relaxed);
+}
+
+void Metrics::server_frames_received_total_increment() {
+    server_frames_received_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::server_calls_received_total_increment() {
+    server_calls_received_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::server_replies_sent_total_increment() {
+    server_replies_sent_total_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::server_force_closes_total_increment() {
+    server_force_closes_total_.fetch_add(1, std::memory_order_relaxed);
 }

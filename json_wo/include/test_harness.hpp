@@ -15,12 +15,13 @@
 #include "router.hpp"
 #include "test_client.hpp"
 #include "test_server.hpp"
+#include "metrics.hpp"
 
 struct TestHarness {
   // Replace these with your real test server/client.
   // Provide operations to: start server, force-close, capture heartbeats, etc.
 
-  TestHarness(boost::asio::io_context& io, std::string host, unsigned short port);
+  TestHarness(boost::asio::io_context& io, std::string host, unsigned short port, Metrics &metrics);
   std::function<void()> server_start      = []{};
   std::function<void()> server_force_close;
   std::function<void()> server_close_on_accept = []{};
@@ -40,4 +41,5 @@ struct TestHarness {
 // private:
   TestClient client_;
   TestServer server_;
+  Metrics& metrics_;
 };

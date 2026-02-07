@@ -1,7 +1,7 @@
 #include "test_harness.hpp"
 
-TestHarness::TestHarness(boost::asio::io_context& io, std::string host, unsigned short port)
-    : client_(io, host, std::to_string(port)), server_(io, port)
+TestHarness::TestHarness(boost::asio::io_context& io, std::string host, unsigned short port, Metrics &metrics)
+    : client_(io, host, std::to_string(port)), server_(io, port, metrics), metrics_(metrics)
 {
     server_start = [&](){
         server_.start();
@@ -12,6 +12,7 @@ TestHarness::TestHarness(boost::asio::io_context& io, std::string host, unsigned
         //     ss->close(websocket::close_code::normal);
         // }
         ;
+        metrics_.server_force_closes_total_increment();
         server_.stop();
     };
 
