@@ -28,6 +28,7 @@ struct ClientLoop::Impl : std::enable_shared_from_this<ClientLoop::Impl> {
     std::shared_ptr<SessionSignals> session_sigs = std::make_shared<SessionSignals>();
     std::shared_ptr<Session> session; //why unique_ptr? because only Impl owns the session. but this creates a problem when writing unit tests. hence make it shared_ptr.
     Metrics metrics_;
+    MetricsLogger metrics_logger_;
     // Probe state
     //why are the following atomics? 
     // they can be used in a multithreading scenario:
@@ -405,3 +406,21 @@ std::uint64_t ClientLoop::connect_attempts() const { return impl_->connect_attem
 //   - Monotonically increases over the lifetime of the ClientLoop.
 //   - Not reset on reconnect; intended for E2E assertions.
 std::uint64_t ClientLoop::online_transitions() const { return impl_->online_transitions_.load(std::memory_order_relaxed); }
+
+void ClientLoop::log_metrics() const { impl_->metrics_logger_.log_metrics(impl_->metrics_.snapshot(), std::cout); }
+//TODO
+//-setup a period call for logging metrics using MetricsLogger class
+//boost::asio::steady_timer timer(ioc);
+
+// std::function<void()> tick;
+// tick = [&] {
+//     // do periodic work here
+
+//     timer.expires_after(std::chrono::seconds(1));
+//     timer.async_wait([&](const boost::system::error_code& ec) {
+//         if (ec) return;      // cancelled or shutdown
+//         tick();              // schedule next tick
+//     });
+// };
+
+// tick(); 

@@ -6,6 +6,8 @@
 #include <string>
 #include <chrono>
 #include "metrics.hpp"
+#include "metrics_logger.hpp"
+
 namespace boost::asio { class io_context; }
 
 struct WsClient;
@@ -13,6 +15,7 @@ class Session;
 struct SessionSignals;//fwd decl
 struct Transport;
 struct Metrics;
+struct MetricsLogger;
 
 class ClientLoop {
     public:
@@ -146,6 +149,8 @@ class ClientLoop {
     //   - Monotonically increases over the lifetime of the ClientLoop.
     //   - Useful for E2E assertions like "boot happens once per connection".
     std::uint64_t online_transitions() const;
+
+    void log_metrics() const;
 
 private:
     //pimpl idiom for reducing build times and encapsulating implementation details
